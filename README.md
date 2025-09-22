@@ -76,6 +76,10 @@ If you have the Arduino IDE installed, you can borrow it from there too. On macO
 
 [Support RTK2GO](http://new.rtk2go.com/donations-and-support/)
 
+### PlatformIO
+
+Update the serial-port paths in [`platformio.ini`](./platformio.ini) to the values read from PlatformIO "Devices" command (`platformio device list`).
+
 ### ESP32 board LED error codes
 
 * 0.1 s BLE: not connected
