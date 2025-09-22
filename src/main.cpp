@@ -3,35 +3,35 @@
  * @file main.cpp
  * @authors Markus Hädrich
  * <br>
- * @brief This is part of a distributed software, here: head tracker and GNSS 
+ * @brief This is part of a distributed software, here: head tracker and GNSS
  *        positioning using Sparkfun Real Time Kinematics
  * <br>
  * @todo  - Task to check / reconnect WiFi (independent of head tracking)
  *        - Calibration button (?)
  *        - Test: BNO080 found/connected
- *        - Test: BLE 
+ *        - Test: BLE
  *        - Status led for WiFi/BLE? on the device box or monitoring in app only?
  *        - Buzzer peep tone if lipo runs out of energy or show an blinky icon/notification in App
- *        
- * @note How to handle WiFi: 
+ *
+ * @note How to handle WiFi:
  *        - Push the wipeButton, this will delete old entries in LittleFS files
- *        - Join the AP thats appearing 
- *            -# SSID: RTK-Rover now, later with more devices e. g. "RTKRover_" + ChipID 
+ *        - Join the AP thats appearing
+ *            -# SSID: RTK-Rover now, later with more devices e. g. "RTKRover_" + ChipID
  *            -# PW: e. g. "12345678"
- *        - Open address 192.168.4.1 in your browser and set credentials you are 
+ *        - Open address 192.168.4.1 in your browser and set credentials you are
  *          using for you personal access point on your smartphone
  *        - If the process is done, the LED turns off and the device reboots
- *        - If there are no Wifi credentials stored in the LittleFS, the device 
+ *        - If there are no Wifi credentials stored in the LittleFS, the device
  *          will jump in AP mode on startup
- * 
+ *
  *       How to measure battery:
- *        - First:  Since the ADC2 module is also used by the Wi-Fi, only one of 
- *                  them could get the preemption when using together, which means 
- *                  the adc2_get_raw() may get blocked until Wi-Fi stops, and 
+ *        - First:  Since the ADC2 module is also used by the Wi-Fi, only one of
+ *                  them could get the preemption when using together, which means
+ *                  the adc2_get_raw() may get blocked until Wi-Fi stops, and
  *                  vice versa. (https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc.html)
  *        - Second: Easiest way, use a fuel gauge breakout board e. g. Adafruit_LC709203F
  *                  Complicated way, implement an alternating usage of WiFi and ADC2
- * 
+ *
  * @version 0.43
  ******************************************************************************/
 
@@ -71,8 +71,8 @@ void buttonHandler(Button2 &btn);
 // Messure half the battery voltage
 #define BAT_PIN                    A13
 /**
- * @brief Get the Battery Volts 
- * 
+ * @brief Get the Battery Volts
+ *
  * @return float Battery voltage
  */
 float getBatteryVolts(void);
@@ -92,13 +92,13 @@ String scannedSSIDs[MAX_SSIDS];
 */
 float bleConnected = false; // TODO: deglobalize this
 
-class MyCharacteristicCallbacks: public BLECharacteristicCallbacks 
+class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
 {
-    void onWrite(BLECharacteristic *pHeadtrackerCharacteristic) 
-    {   
+    void onWrite(BLECharacteristic *pHeadtrackerCharacteristic)
+    {
         std::string value = pHeadtrackerCharacteristic->getValue(); // Here I get the commands from the App (client)
 
-        if (value.length() > 0) 
+        if (value.length() > 0)
         {
             DBG.println(F("*********"));
             DBG.print(F("New value: "));
@@ -110,14 +110,14 @@ class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
         }
      }
 
-     void onConnect(BLEServer* pServer) 
+     void onConnect(BLEServer* pServer)
      {
         bleConnected = true;
         DBG.print(F("bleConnected: "));
         DBG.println(bleConnected);
      };
 
-    void onDisconnect(BLEServer* pServer) 
+    void onDisconnect(BLEServer* pServer)
     {
         bleConnected = false;
         DBG.print(("bleConnected: "));
@@ -125,15 +125,15 @@ class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
     }
 };
 
-class MyServerCallbacks: public BLEServerCallbacks 
+class MyServerCallbacks: public BLEServerCallbacks
 {
-    void onConnect(BLEServer* pServer) 
+    void onConnect(BLEServer* pServer)
     {
         bleConnected = true;
         BLEDevice::stopAdvertising();
     };
 
-    void onDisconnect(BLEServer* pServer) 
+    void onDisconnect(BLEServer* pServer)
     {
         bleConnected = false;
         BLEDevice::startAdvertising();
@@ -174,7 +174,7 @@ SFE_UBLOX_GNSS myGNSS;
 
 /**
  * @brief Setup the ZED-F9D to a rover
- * 
+ *
  * @return true If succeeded
  * @return false If failed
  */
@@ -182,13 +182,13 @@ bool setupGNSS(void);
 
 /**
  * @brief Start the
- * 
+ *
  */
 void beginClient(void);
 
 /**
  * @brief Get the Position
- * 
+ *
  */
 void updatePosition(void);
 
@@ -212,22 +212,22 @@ static xSemaphoreHandle mutexSem;
 /**
  * @brief Task to get the correction data from the caster server
  *        using WiFi
- * 
+ *
  * @param pvParameters Void pointer, no parameter used here
  */
 void task_rtk_get_corrrection_data(void *pvParameters);
 
 /**
  * @brief Task to get location data
- * 
- * @param pvParameters 
+ *
+ * @param pvParameters
  */
 
 void task_rtk_get_rover_position(void *pvParameters);
 /**
  * @brief Task for sending the corrected location data to the
  *        iPhone using BLE
- * 
+ *
  * @param pvParameters Void pointer, no parameter used here
  */
 void task_send_rtk_position_via_ble(void *pvParameters);
@@ -235,20 +235,20 @@ void task_send_rtk_position_via_ble(void *pvParameters);
 /**
  * @brief Task for sending the BNO080 position data to the
  *        iPhone using BLE
- * 
+ *
  * @param pvParameters Void pointer, no parameter used here
  */
 void task_bno_orientation_via_ble(void *pvParameters);
 
 /**
  * @brief Create the queues with the right size
- * 
+ *
  */
 void xQueueSetup(void);
 
 /**
  * @brief Function that blinks one time
- * 
+ *
  * @param blinkTime       Blink time in ms
  * @param doNotBlock  Kind of delay between blinking
  */
@@ -256,11 +256,11 @@ void blinkOneTime(int blinkTime, bool doNotBlock);
 
 /**
  * @brief Deletes WiFi station SSID and PW from LittleFS
- * 
+ *
  */
 void wipeWiFiCredentials(void);
 
-void setup() 
+void setup()
 {
   // Board LED used for error codes (written in README.md)
   pinMode(LED_BUILTIN, OUTPUT);
@@ -274,7 +274,7 @@ void setup()
  //===============================================================================
   // Initialize LittleFS
   // Use board_build.partitions in platformio.ini
-  if (!setupLittleFS()) 
+  if (!setupLittleFS())
   {
     formatLittleFS();
     if (!setupLittleFS()) while (true) {};
@@ -298,7 +298,7 @@ void setup()
   setupWiFi(&server);
   delay(1000);
 
-  while (WiFi.getMode() == WIFI_AP) 
+  while (WiFi.getMode() == WIFI_AP)
   {
     DBG.println(F("Enter Wifi credentials on webform:"));
     DBG.print(F("Connect your computer to SSID: "));
@@ -308,7 +308,7 @@ void setup()
     blinkOneTime(1000, false);
     blinkOneTime(100, false);
   }
-  if (WiFi.getMode() == WIFI_STA) 
+  if (WiFi.getMode() == WIFI_STA)
   {
     while (! WiFi.isConnected())
     {
@@ -320,12 +320,12 @@ void setup()
     }
   }
 //===============================================================================
-  
+
   setupBLE();
-  
+
   DBG.print(F("Device type: ")); DBG.println(DEVICE_TYPE);
   DBG.print(F("Battery: "));
-  DBG.print(getBatteryVolts());  
+  DBG.print(getBatteryVolts());
   DBG.println(" V");
 
   wipeButton.setPressedHandler(buttonHandler); // Pull down method is done in wipeButton init
@@ -333,29 +333,29 @@ void setup()
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
   xQueueSetup();
-/*  
-  Stack sizes of the tasks. You have to measure the used size in the task (set a high value for first run) and 
-  after that you can reduce the stack size to an fitting smaller value. This have to repeated if 
+/*
+  Stack sizes of the tasks. You have to measure the used size in the task (set a high value for first run) and
+  after that you can reduce the stack size to an fitting smaller value. This have to repeated if
   the task code is changed. There are no rules, just measure and adjust (thats why its a magic number).
   For measurement you need to uncomment the uxHighWaterMark related code in the task (setup and loop).
   After measurement comment out it again.
 */
-  int stack_size_task_rtk_get_corrrection_data = 1024 * 7;          // Last measurement: 
-  int stack_size_task_rtk_get_rover_position = 1024 * 7;      // Last measurement: 5844 
+  int stack_size_task_rtk_get_corrrection_data = 1024 * 7;          // Last measurement:
+  int stack_size_task_rtk_get_rover_position = 1024 * 7;      // Last measurement: 5844
   int stack_size_task_bno_orientation_via_ble = 1024 * 11;  // Last measurement:
   int stack_size_task_send_rtk_position_via_ble = 1024 * 10;     // Last measurement: 9480
-  
+
   xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, NULL, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, NULL, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
   xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
-  
+
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
   DBG.println(thisBoard);
 }
 
-void loop() 
+void loop()
 {
   #ifdef DEBUGGING
   aunit::TestRunner::run();
@@ -369,9 +369,9 @@ void loop()
                                 GNSS
 =======================================_==========================================
 */
-bool setupGNSS() 
+bool setupGNSS()
 {
-    while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN)) 
+    while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN))
     {
       DBG.println(F("I2C for RTK not running, check cable!"));
       delay(500);
@@ -387,12 +387,12 @@ bool setupGNSS()
 
     bool response = true;
     //Turn off NMEA noise
-    response &= myGNSS.setI2COutput(COM_TYPE_UBX); 
+    response &= myGNSS.setI2COutput(COM_TYPE_UBX);
     //Be sure RTCM3 input is enabled. UBX + RTCM3 is not a valid state.
-    response &= myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3); 
+    response &= myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3);
     response &= myGNSS.setHighPrecisionMode(true);
     // Set output in Hz.
-    response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ); 
+    response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ);
     byte rate = myGNSS.getNavigationFrequency(); //Get the update rate of this module
     DBG.print("Current update rate: ");
     DBG.println(rate);
@@ -400,7 +400,7 @@ bool setupGNSS()
     return response;
 }
 
-void updatePosition() 
+void updatePosition()
 {
   static int32_t old_accuracy = -1;
   coord_t coord;
@@ -414,7 +414,7 @@ void updatePosition()
   int32_t accuracy = myGNSS.getPositionAccuracy();
 
   coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
-  xQueueSend(xQueueCoord, &coord, portMAX_DELAY); 
+  xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
 
   // Send accuracy if changed only
   if (accuracy != old_accuracy)
@@ -431,12 +431,12 @@ void updatePosition()
 =================================================================================
 */
 
-void task_rtk_get_rover_position(void *pvParameters) 
+void task_rtk_get_rover_position(void *pvParameters)
 {
   (void)pvParameters;
 
   // Measure stack size
-  UBaseType_t uxHighWaterMark; 
+  UBaseType_t uxHighWaterMark;
 
   // Wait for first correction data
   while ( ! beginPositioning) { vTaskDelay(1000/portTICK_PERIOD_MS); }
@@ -454,20 +454,20 @@ void task_rtk_get_rover_position(void *pvParameters)
 
       xSemaphoreGive(mutexSem);
     }
-   
+
     vTaskDelay(TASK_RTK_GET_POSITION_INTERVAL_MS/portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
 }
 
-void task_rtk_get_corrrection_data(void *pvParameters) 
+void task_rtk_get_corrrection_data(void *pvParameters)
 {
   (void)pvParameters;
 
-  if (!setupGNSS()) 
-  { 
+  if (!setupGNSS())
+  {
     DBG.println("setupGNSS() failed! Restart in 10 s");
-    while (true) 
+    while (true)
     {
       static const int timeToReboot = 10000;
       static int counter = 0;
@@ -486,12 +486,12 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
 //=========================================================================
   // 5 RTCM messages take approximately ~300ms to arrive at 115200bps
-  long lastReceivedRTCM_ms = 0; 
+  long lastReceivedRTCM_ms = 0;
   // If we fail to get a complete RTCM frame after 10s, then disconnect from caster
-  const int maxTimeBeforeHangup_ms = 10000; 
+  const int maxTimeBeforeHangup_ms = 10000;
 
   // Measure stack size
-  UBaseType_t uxHighWaterMark; 
+  UBaseType_t uxHighWaterMark;
 
   // Read RTK credentials
   String casterHost = readFile(LittleFS, getPath(PARAM_RTK_CASTER_HOST).c_str());
@@ -499,7 +499,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   String casterUser = readFile(LittleFS, getPath(PARAM_RTK_CASTER_USER).c_str());
   String mountPoint =  readFile(LittleFS, getPath(PARAM_RTK_MOINT_POINT).c_str());
   String casterUserPW = kCasterUserPw; // No password needed, but it is defined in CasterSecrets.h
-  
+
   // Check RTK credentials
   bool credentialsExists = true;
   credentialsExists &= !casterHost.isEmpty();
@@ -507,7 +507,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   credentialsExists &= !casterUser.isEmpty();
   credentialsExists &= !mountPoint.isEmpty();
 
-  while (!credentialsExists) 
+  while (!credentialsExists)
   {
     DBG.println(F("RTK credentials incomplete!\nFreezing RTK task."));
     blinkOneTime(2000, true);
@@ -519,16 +519,16 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   while (true) // Task loop begins
   {
     /** This ist most of the content beginServing() func from the
-     * Sparkfun u-blox GNSS Arduino Library/ZED-F9P/Example15-NTRIPClient 
+     * Sparkfun u-blox GNSS Arduino Library/ZED-F9P/Example15-NTRIPClient
      * Because I did not wanted to change the code too much if you want to compare
      * with the Example14 I used of the "evil" goto as a replace for the return command.
      * (A task must not return.)
      */
-    
+
       if (ntripClient.connected() == false)
       {
         // First check WiFi connection
-        while ( ! checkConnectionToWifiStation() ) 
+        while ( ! checkConnectionToWifiStation() )
         {
           DBG.println(F("task loop: Not connected to WiFi station"));
           blinkOneTime(1000, false);
@@ -539,11 +539,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(casterHost.c_str());
 
         // Attempt connection
-        if (ntripClient.connect( casterHost.c_str(), (uint16_t)casterPort.toInt() ) == false) 
+        if (ntripClient.connect( casterHost.c_str(), (uint16_t)casterPort.toInt() ) == false)
         {
           DBG.println(F("Connection to caster failed, retry in 5s"));
           vTaskDelay(5000/portTICK_PERIOD_MS);
-      
+
           goto task_end; // replaces the return command from the SparkFun example (a task must not return)
         }
         else
@@ -591,7 +591,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   #endif
           }
 
-          // This warning comes because source and destination have the same size, 
+          // This warning comes because source and destination have the same size,
           // but it is large enough and the buffer should not be full at any time.
           strncat(serverRequest, credentials, SERVER_BUFFER_SIZE);
           strncat(serverRequest, "\r\n", SERVER_BUFFER_SIZE);
@@ -605,7 +605,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           DBG.println(F("Sending server request:"));
           DBG.println(serverRequest);
           ntripClient.write(serverRequest, strlen(serverRequest));
-          
+
           // Wait for response
           unsigned long timeout = millis();
           while (ntripClient.available() == 0)
@@ -690,7 +690,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             lastReceivedRTCM_ms = currentTime;
           }
 
-          
+
           // updatePosition(); //This is done now in a dedicated task
         }
       }   // End (ntripClient.connected() == true)
@@ -708,9 +708,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // DBG.print(F("task_rtk_get_corrrection_data loop, uxHighWaterMark: "));
       // DBG.println(uxHighWaterMark);
     // } /*** End if (xSemaphoreTake(mutexSem, portMAX_DELAY)) ***/
-    
+
     task_end:
-    
+
     // Wait a bit before the next request will be started
     vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
   }
@@ -726,11 +726,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 =================================================================================
 */
 void setupBLE(void)
-{   
+{
     String deviceName = getDeviceName(DEVICE_TYPE);
     BLEDevice::init(deviceName.c_str());
     BLEServer *pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks()); 
+    pServer->setCallbacks(new MyServerCallbacks());
     BLEService *pService = pServer->createService(SERVICE_UUID);
     // Create characteristics
     pHeadtrackerCharacteristic = pService->createCharacteristic(
@@ -748,7 +748,7 @@ void setupBLE(void)
                                         //  BLECharacteristic::PROPERTY_INDICATE |
                                          BLECharacteristic::PROPERTY_NOTIFY  // We only use notify characteristic (fastest -> no response)
                                        );
-                                    
+
     pRTKAccuracyCharacteristic = pService->createCharacteristic(
                                 RTK_ACCURACY_CHARACTERISTIC_UUID,
                                 //  BLECharacteristic::PROPERTY_READ   |
@@ -764,7 +764,7 @@ void setupBLE(void)
     pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
     // pRealtimeKinematicsCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
     // pRealtimeKinematicsCharacteristic->setValue(deviceName.c_str());
-    
+
     pRTKAccuracyCharacteristic->addDescriptor(new BLE2902());
 
     pService->start();
@@ -779,46 +779,46 @@ void setupBLE(void)
 }
 
 void setupBNO080()
-{   
+{
   Wire.begin();
-  while (!bno080.begin()) 
+  while (!bno080.begin())
   {
     // Wait
     DBG.println(F("BNO080 not ready, waiting for I2C..."));
     delay(500);
   }
-    
+
   // Activate IMU functionalities
-  bno080.enableARVRStabilizedRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS); 
+  bno080.enableARVRStabilizedRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
   // bno080.enableARVRStabilizedGameRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
-  // bno080.enableRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);  
-  // bno080.enableGameRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);  
-  
-  bno080.enableAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);    
-  bno080.enableLinearAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);    
-  // bno080.enableStepCounter(20);   // Thomas: Funktioniert sehr schlecht.. 
-  
+  // bno080.enableRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
+  // bno080.enableGameRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
+
+  bno080.enableAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);
+  bno080.enableLinearAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);
+  // bno080.enableStepCounter(20);   // Thomas: Funktioniert sehr schlecht..
+
   // Markus: --> timeBetweenReports should not be 20 ms ;)  try this: 31.25 Hz
-  // bno080.enableStepCounter(32);      
+  // bno080.enableStepCounter(32);
 }
 
-void xQueueSetup() 
+void xQueueSetup()
 {
   xQueueCoord  = xQueueCreate( QUEUE_SIZE, sizeof( coord_t ) );
   xQueueAccuracy  = xQueueCreate( QUEUE_SIZE, sizeof( long ) );
 }
 
-void task_send_rtk_position_via_ble(void *pvParameters) 
+void task_send_rtk_position_via_ble(void *pvParameters)
 {
   (void)pvParameters;
-  
+
   String latLonStr((char *)0);
   // String accuracyMmStr((char *)0);
   String accuracyStr((char *)0);
   // Latitude: 9, delimiter: 1, latitudeHp: 2, longitude: 9, delimiter: 1, longitudeHp: 2,
   latLonStr.reserve(27);
-  accuracyStr.reserve(5); 
- 
+  accuracyStr.reserve(5);
+
   coord_t coord;
   int32_t lat, lon, accuracy;
   int8_t latHp, lonHp;
@@ -830,11 +830,11 @@ void task_send_rtk_position_via_ble(void *pvParameters)
   // DBG.print(F("task_send_rtk_position_via_ble setup, uxHighWaterMark: "));
   // DBG.println(uxHighWaterMark);
 
-  while (true) 
+  while (true)
   {
-    if (bleConnected) 
+    if (bleConnected)
     {
-      if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS) 
+      if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS)
       {
         // DBG.print("Received coord.lat = ");
         // DBG.print(coord.lat);
@@ -862,7 +862,7 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         pRealtimeKinematicsCharacteristic->notify();
       }
 
-      if (xQueueReceive( xQueueAccuracy, &accuracy, ( TickType_t ) 10 ) == pdPASS) 
+      if (xQueueReceive( xQueueAccuracy, &accuracy, ( TickType_t ) 10 ) == pdPASS)
       {
         accuracyStr = String(accuracy);
         // DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
@@ -873,7 +873,7 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         // DBG.print(accuracy);
         // DBG.println(F(" mm"));
       }
-    
+
       /*  Measure stack size (last was 9356) */
       // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
       // DBG.print(F("task_send_rtk_position_via_ble loop, uxHighWaterMark: "));
@@ -884,21 +884,21 @@ void task_send_rtk_position_via_ble(void *pvParameters)
     {
       blinkOneTime(100, true);
     }
- 
+
 
     vTaskDelay(TASK_RTK_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
     // taskYIELD();
   } // while (true) ends
-  
+
   // Delete self task
   vTaskDelete(NULL);
 }
 
-void task_bno_orientation_via_ble(void *pvParameters) 
+void task_bno_orientation_via_ble(void *pvParameters)
 {
     (void)pvParameters;
 
-    while (!bleConnected) 
+    while (!bleConnected)
     {
       DBG.println(F("BNO tasks setup: Open RWA to connect BLE"));
       vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -911,40 +911,40 @@ void task_bno_orientation_via_ble(void *pvParameters)
     String dataStr((char *)0);
     // String size: (yaw: 3, delimiter: 1, pitch: 3, delimiter: 1, linAccelZF: 4) = 12 + LIN_ACCEL_Z_DECIMAL_DIGITS
     dataStr.reserve(12 + LIN_ACCEL_Z_DECIMAL_DIGITS);
-    
+
     // Measure stack size
     UBaseType_t uxHighWaterMark;
     // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
     // DBG.print(F("task_bno_orientation_via_ble setup, uxHighWaterMark: "));
     // DBG.println(uxHighWaterMark);
 
-    while (true) 
+    while (true)
     {
-      if (!bleConnected) 
+      if (!bleConnected)
       {
         DBG.println(F("BNO tasks loop: Please connect BLE"));
         vTaskDelay(1000/portTICK_PERIOD_MS);
       }
-      else 
+      else
       {
         // TODO: Separate reading values from sending values
-        if (bno080.dataAvailable()) 
-        {         
+        if (bno080.dataAvailable())
+        {
           quatI = bno080.getQuatI();
           quatJ = bno080.getQuatJ();
           quatK = bno080.getQuatK();
-          quatReal = bno080.getQuatReal();       
+          quatReal = bno080.getQuatReal();
 
           imu::Quaternion quat = imu::Quaternion(quatReal, quatI, quatJ, quatK);
           quat.normalize();
-          imu::Vector<3> q_to_euler = quat.toEuler();     
+          imu::Vector<3> q_to_euler = quat.toEuler();
           yawDegreeF = q_to_euler.x();
           yawDegreeF = yawDegreeF * -180.0 / M_PI;   // conversion to Degree
-              
+
           if ( yawDegreeF < 0 ) yawDegreeF += 359.0; // convert negative to positive angles
-          
-          yawDegree = (int)(round(yawDegreeF));  
-          
+
+          yawDegree = (int)(round(yawDegreeF));
+
           pitchDegreeF = q_to_euler.z();
           pitchDegreeF = pitchDegreeF * -180.0 / M_PI;
           pitchDegree = (int)(round(pitchDegreeF));
@@ -954,15 +954,15 @@ void task_bno_orientation_via_ble(void *pvParameters)
           // rollDegree = (int)(round(rollDegreeF));
 
           // Seems to be much slower than bno080.getAccelZ()
-          linAccelZF = bno080.getLinAccelZ();  
+          linAccelZF = bno080.getLinAccelZ();
 
           dataStr = String(yawDegree) + DATA_STR_DELIMITER + String(pitchDegree) \
                   + DATA_STR_DELIMITER + String(linAccelZF, LIN_ACCEL_Z_DECIMAL_DIGITS);
           pHeadtrackerCharacteristic->setValue(dataStr.c_str());
           pHeadtrackerCharacteristic->notify();
-          // DBG.println(linAccelZF);      
-          } 
-          else 
+          // DBG.println(linAccelZF);
+          }
+          else
           {
             DBG.println(F("Ready for BNO080 dataAvailable"));
             vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -986,11 +986,11 @@ void task_bno_orientation_via_ble(void *pvParameters)
                                 Battery
 =================================================================================
 */
-float getBatteryVolts() 
+float getBatteryVolts()
 {
-  // Vout = Dout * Vmax / Dmax 
-  // Because battery volts are higher than Vmax, we use the voltage devider on 
-  // Pin A13 (Huzzah ESP32, it may be different on other boards) 
+  // Vout = Dout * Vmax / Dmax
+  // Because battery volts are higher than Vmax, we use the voltage devider on
+  // Pin A13 (Huzzah ESP32, it may be different on other boards)
   float batteryVolts = 2.0 * (analogRead(BAT_PIN) * 3.3 / 4095.0);
   return batteryVolts;
 }
@@ -1000,12 +1000,12 @@ float getBatteryVolts()
                                 Button(s)
 =================================================================================
 */
-void buttonHandler(Button2 &btn) 
+void buttonHandler(Button2 &btn)
 {
-  if (btn == wipeButton) 
+  if (btn == wipeButton)
   {
     digitalWrite(LED_BUILTIN, HIGH);
-    
+
     // Clear whole memory
     //DBG.println(F("Wiping whole memory..."));
     //wipeLittleFSFiles();
@@ -1015,7 +1015,7 @@ void buttonHandler(Button2 &btn)
     DBG.println(F("Wiping WiFi credentials from memory..."));
     clearPath(getPath(PARAM_WIFI_SSID).c_str());
     clearPath(getPath(PARAM_WIFI_PASSWORD).c_str());
-    
+
     ESP.restart();
   }
 }
