@@ -355,6 +355,27 @@ void loop()
                                 GNSS
 =======================================_==========================================
 */
+
+char ggaSentence[NMEA_GGA_MAX_LENGTH] = {0};
+volatile bool ggaSentenceComplete = false;
+
+// Callback: callbackGPGGA will be called when new GPGGA NMEA data arrives
+// See u-blox_structs.h for the full definition of NMEA_GGA_data_t
+//         _____  You can use any name you like for the callback. Use the same name when you call setNMEAGPGGAcallback
+//        /               _____  This _must_ be NMEA_GGA_data_t
+//        |              /           _____ You can use any name you like for the struct
+//        |              |          /
+//        |              |          |
+void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
+{
+  if (xSemaphoreTake(mutexSem, portMAX_DELAY)) {
+    memset(ggaSentence, 0, NMEA_GGA_MAX_LENGTH);
+    strncpy(ggaSentence, (const char *)nmeaData->nmea, nmeaData->length);
+    ggaSentenceComplete = true;
+    xSemaphoreGive(mutexSem);
+  }
+}
+
 bool setupGNSS()
 {
     while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN))
@@ -372,16 +393,21 @@ bool setupGNSS()
     }
 
     bool response = true;
-    //Turn off NMEA noise
-    response &= myGNSS.setI2COutput(COM_TYPE_UBX);
-    //Be sure RTCM3 input is enabled. UBX + RTCM3 is not a valid state.
-    response &= myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3);
+    response &= myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_NMEA); // Set the I2C port to output both NMEA and UBX messages
+    response &= myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3); // Be sure RTCM3 input is enabled. UBX + RTCM3 is not a valid state.
+    response &= myGNSS.setDGNSSConfiguration(SFE_UBLOX_DGNSS_MODE_FIXED); // Set the differential mode - ambiguities are fixed whenever possible
+    response &= myGNSS.enableNMEAMessage(UBX_NMEA_GGA, COM_PORT_I2C);  // Verify the GGA sentence is enabled
     response &= myGNSS.setHighPrecisionMode(true);
+    response &= myGNSS.setMainTalkerID(SFE_UBLOX_MAIN_TALKER_ID_GP); // Set the Main Talker ID to "GP". The NMEA GGA messages will be GPGGA instead of GNGGA
+
     // Set output in Hz.
     response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ);
-    byte rate = myGNSS.getNavigationFrequency(); //Get the update rate of this module
+    byte rate = myGNSS.getNavigationFrequency(); // Get the update rate of this module
     DBG.print("Current update rate: ");
     DBG.println(rate);
+
+    response &= myGNSS.setNMEAGPGGAcallbackPtr(&callbackGPGGA); // Set up the callback for GPGGA
+    response &= myGNSS.setVal8(UBLOX_CFG_MSGOUT_NMEA_ID_GGA_I2C, 10); // Tell the module to output GGA every 10 seconds
 
     return response;
 }
@@ -398,6 +424,12 @@ void updatePosition()
   int32_t lon = myGNSS.getHighResLongitude();
   int8_t lonHp = myGNSS.getHighResLongitudeHp();
   int32_t accuracy = myGNSS.getPositionAccuracy();
+
+  Serial.print("Latitude: "); Serial.print(lat);
+  Serial.print(", LatHp: "); Serial.print(latHp);
+  Serial.print(", Longitude: "); Serial.print(lon);
+  Serial.print(", LonHp: "); Serial.print(lonHp);
+  Serial.print(", Accuracy: "); Serial.println(accuracy);
 
   coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
   xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
@@ -472,6 +504,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   long lastReceivedRTCM_ms = 0;
   // If we fail to get a complete RTCM frame after 10s, then disconnect from caster
   const int maxTimeBeforeHangup_ms = 10000;
+
+  int timeBetweenGGAUpdate_ms = 10000; //GGA is required for Rev2 NTRIP casters. Don't transmit but once every 10 seconds
+  long lastTransmittedGGA_ms = 0;
 
   // Measure stack size
   UBaseType_t uxHighWaterMark;
@@ -640,6 +675,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             DBG.print(F("Connected to "));
             DBG.println(casterHost.c_str());
             lastReceivedRTCM_ms = millis(); // Reset timeout
+
+            myGNSS.checkUblox();
+            myGNSS.checkCallbacks();
           }
         } // End attempt to connect
       } // End connected == false
@@ -675,6 +713,38 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
         }
       }   // End (ntripClient.connected() == true)
+
+      //Provide the caster with our current position as needed
+      if (ntripClient.connected() == true && (millis() - lastTransmittedGGA_ms) > timeBetweenGGAUpdate_ms)
+      {
+        char localGgaSentence[NMEA_GGA_MAX_LENGTH] = {0};
+        bool shouldSendGga = false;
+
+        if (xSemaphoreTake(mutexSem, portMAX_DELAY))
+        {
+          if (ggaSentenceComplete == true)
+          {
+            strncpy(localGgaSentence, ggaSentence, NMEA_GGA_MAX_LENGTH - 1);
+            localGgaSentence[NMEA_GGA_MAX_LENGTH - 1] = '\0';
+            shouldSendGga = true;
+
+            // start over
+            ggaSentenceComplete = false;
+            lastTransmittedGGA_ms = millis();
+          }
+          xSemaphoreGive(mutexSem);
+        }
+
+        if (shouldSendGga)
+        {
+          DBG.print(F("Pushing GGA to server: "));
+          DBG.println(localGgaSentence);
+
+          //Push our current GGA sentence to caster
+          ntripClient.print(localGgaSentence);
+          ntripClient.print("\r\n");
+        }
+      }
 
       // Close socket if we don't have new data for 10s
       if (millis() - lastReceivedRTCM_ms > maxTimeBeforeHangup_ms)
