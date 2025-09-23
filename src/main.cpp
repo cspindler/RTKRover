@@ -7,24 +7,14 @@
  *        positioning using Sparkfun Real Time Kinematics
  * <br>
  * @todo  - Task to check / reconnect WiFi (independent of head tracking)
+ *        - Upgrade to Sparkfun RTK Library v3
  *        - Calibration button (?)
  *        - Test: BNO080 found/connected
  *        - Test: BLE
  *        - Status led for WiFi/BLE? on the device box or monitoring in app only?
  *        - Buzzer peep tone if lipo runs out of energy or show an blinky icon/notification in App
  *
- * @note How to handle WiFi:
- *        - Push the wipeButton, this will delete old entries in LittleFS files
- *        - Join the AP thats appearing
- *            -# SSID: RTK-Rover now, later with more devices e. g. "RTKRover_" + ChipID
- *            -# PW: e. g. "12345678"
- *        - Open address 192.168.4.1 in your browser and set credentials you are
- *          using for you personal access point on your smartphone
- *        - If the process is done, the LED turns off and the device reboots
- *        - If there are no Wifi credentials stored in the LittleFS, the device
- *          will jump in AP mode on startup
- *
- *       How to measure battery:
+ * @note How to measure battery:
  *        - First:  Since the ADC2 module is also used by the Wi-Fi, only one of
  *                  them could get the preemption when using together, which means
  *                  the adc2_get_raw() may get blocked until Wi-Fi stops, and
@@ -59,7 +49,7 @@ using namespace RTKRoverManager;
 #include "Button2.h"
 
 // Button to press to wipe out stored WiFi credentials
-Button2 wipeButton = Button2(WIPE_BUTTON_PIN, INPUT, false, false);
+Button2 rebootButton = Button2(REBOOT_BUTTON_PIN, INPUT, false, false);
 
 void buttonHandler(Button2 &btn);
 
@@ -250,7 +240,7 @@ void xQueueSetup(void);
  * @brief Function that blinks one time
  *
  * @param blinkTime       Blink time in ms
- * @param doNotBlock  Kind of delay between blinking
+ * @param doNotBlock      Type of delay between blinking
  */
 void blinkOneTime(int blinkTime, bool doNotBlock);
 
@@ -294,32 +284,32 @@ void setup()
 #endif
 
   //===============================================================================
-  // Wifi setup AP or STATION, depending on data in LittleFS
+  // Read Wifi credentials from header and save them into LittleFS, so the RTKRoverManger
+  // needs no API change for this special use case in Basel 01/2023
+  // (Reason: Users could accidentally press the wipe button)
+  writeFile(LittleFS, getPath(PARAM_WIFI_SSID).c_str(), kWifiSsid);
+  writeFile(LittleFS, getPath(PARAM_WIFI_PASSWORD).c_str(), kWifiPw);
+  writeFile(LittleFS, getPath(PARAM_DEVICE_NAME).c_str(), kDeviceName);
+
   setupWiFi(&server);
   delay(1000);
-
-  while (WiFi.getMode() == WIFI_AP)
+  // while ( ! checkConnectionToWifiStation() )
+  while (! WiFi.isConnected())
   {
-    DBG.println(F("Enter Wifi credentials on webform:"));
-    DBG.print(F("Connect your computer to SSID: "));
-    DBG.println(WiFi.getHostname());
-    DBG.print(F("Go with your Browser to IP: "));
-    DBG.println(WiFi.softAPIP());
+    DBG.println(F("setup(): Not connected to WiFi station"));
+    DBG.printf("WiFi state: %d", WiFi.isConnected());
+    if (WiFi.getMode() == WIFI_AP)
+    {
+      DBG.println(F("Enter Wifi credentials on webform:"));
+      DBG.print(F("Connect yor computer to SSID: "));
+      DBG.println(WiFi.getHostname());
+      DBG.print(F("Go with your Browser to IP: "));
+      DBG.println(WiFi.softAPIP());
+    }
     blinkOneTime(1000, false);
     blinkOneTime(100, false);
+    setupWiFi(&server);
   }
-  if (WiFi.getMode() == WIFI_STA)
-  {
-    while (! WiFi.isConnected())
-    {
-      DBG.println(F("setup(): Try reconnect to WiFi station"));
-      WiFi.reconnect();
-      DBG.printf("WiFi state: %s", WiFi.isConnected() ? "connected" : "disconnected");
-      blinkOneTime(1000, false);
-      blinkOneTime(100, false);
-    }
-  }
-//===============================================================================
 
   setupBLE();
 
@@ -327,8 +317,6 @@ void setup()
   DBG.print(F("Battery: "));
   DBG.print(getBatteryVolts());
   DBG.println(" V");
-
-  wipeButton.setPressedHandler(buttonHandler); // Pull down method is done in wipeButton init
 
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
@@ -360,8 +348,6 @@ void loop()
   #ifdef DEBUGGING
   aunit::TestRunner::run();
   #endif
-
-  wipeButton.loop();
 }
 
 /*
@@ -466,14 +452,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
   if (!setupGNSS())
   {
-    DBG.println("setupGNSS() failed! Restart in 10 s");
+    DBG.println("setupGNSS() failed! Freezing...");
     while (true)
     {
-      static const int timeToReboot = 10000;
-      static int counter = 0;
+      // TODO: this part requires a procedure to recover from setup failure!
       blinkOneTime(1000, true);
-      counter++;
-      if (counter > 5) ESP.restart();
     }
   };
 
@@ -494,11 +477,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   UBaseType_t uxHighWaterMark;
 
   // Read RTK credentials
-  String casterHost = readFile(LittleFS, getPath(PARAM_RTK_CASTER_HOST).c_str());
-  String casterPort = readFile(LittleFS, getPath(PARAM_RTK_CASTER_PORT).c_str());
-  String casterUser = readFile(LittleFS, getPath(PARAM_RTK_CASTER_USER).c_str());
-  String mountPoint =  readFile(LittleFS, getPath(PARAM_RTK_MOINT_POINT).c_str());
-  String casterUserPW = kCasterUserPw; // No password needed, but it is defined in CasterSecrets.h
+  String casterHost = kCasterHost;
+  String casterPort = kCasterPort;
+  String casterUser = kCasterUser;
+  String mountPoint =  kMountPoint;
+  String casterUserPW = kCasterUserPw;
 
   // Check RTK credentials
   bool credentialsExists = true;
@@ -576,26 +559,26 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             DBG.print(F("Sending credentials: "));
             DBG.println(userCredentials);
 
-  #if defined(ARDUINO_ARCH_ESP32)
+            #if defined(ARDUINO_ARCH_ESP32)
             // Encode with ESP32 built-in library
             base64 b;
             String strEncodedCredentials = b.encode(userCredentials);
             char encodedCredentials[strEncodedCredentials.length() + 1];
             strEncodedCredentials.toCharArray(encodedCredentials, sizeof(encodedCredentials)); //Convert String to char array
             snprintf(credentials, sizeof(credentials), "Authorization: Basic %s\r\n", encodedCredentials);
-  #else
+            #else
             // Encode with nfriendly library
             int encodedLen = base64_enc_len(strlen(userCredentials));
             char encodedCredentials[encodedLen]; //Create array large enough to house encoded data
             base64_encode(encodedCredentials, userCredentials, strlen(userCredentials)); //Note: Input array is consumed
-  #endif
+            #endif
           }
 
           // This warning comes because source and destination have the same size,
           // but it is large enough and the buffer should not be full at any time.
           strncat(serverRequest, credentials, SERVER_BUFFER_SIZE);
           strncat(serverRequest, "\r\n", SERVER_BUFFER_SIZE);
-          DBG.printf("serverRequest len: %d", strlen(serverRequest));
+          DBG.printf("serverRequest len: %d ", strlen(serverRequest));
           DBG.print(F("serverRequest size: "));
           DBG.print(strlen(serverRequest));
           DBG.print(F(" of "));
@@ -690,8 +673,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             lastReceivedRTCM_ms = currentTime;
           }
 
-
-          // updatePosition(); //This is done now in a dedicated task
         }
       }   // End (ntripClient.connected() == true)
 
@@ -836,14 +817,14 @@ void task_send_rtk_position_via_ble(void *pvParameters)
     {
       if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS)
       {
-        // DBG.print("Received coord.lat = ");
-        // DBG.print(coord.lat);
-        // DBG.print(", coord.latHp = ");
-        // DBG.print(coord.latHp);
-        // DBG.print(" coord.lon = ");
-        // DBG.print(coord.lon);
-        // DBG.print(", coord.lonHp = ");
-        // DBG.println(coord.lonHp);
+        DBG.print("Received coord.lat = ");
+        DBG.print(coord.lat);
+        DBG.print(", coord.latHp = ");
+        DBG.print(coord.latHp);
+        DBG.print(" coord.lon = ");
+        DBG.print(coord.lon);
+        DBG.print(", coord.lonHp = ");
+        DBG.println(coord.lonHp);
         lat = coord.lat;
         latHp = coord.latHp;
         lon = coord.lon;
@@ -865,13 +846,13 @@ void task_send_rtk_position_via_ble(void *pvParameters)
       if (xQueueReceive( xQueueAccuracy, &accuracy, ( TickType_t ) 10 ) == pdPASS)
       {
         accuracyStr = String(accuracy);
-        // DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
+        DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
         pRTKAccuracyCharacteristic->setValue(accuracyStr.c_str());
         pRTKAccuracyCharacteristic->notify();
 
-        // DBG.print(F("Received accuracy = "));
-        // DBG.print(accuracy);
-        // DBG.println(F(" mm"));
+        DBG.print(F("Received accuracy = "));
+        DBG.print(accuracy);
+        DBG.println(F(" mm"));
       }
 
       /*  Measure stack size (last was 9356) */
@@ -1002,20 +983,10 @@ float getBatteryVolts()
 */
 void buttonHandler(Button2 &btn)
 {
-  if (btn == wipeButton)
+  if (btn == rebootButton)
   {
     digitalWrite(LED_BUILTIN, HIGH);
-
-    // Clear whole memory
-    //DBG.println(F("Wiping whole memory..."));
-    //wipeLittleFSFiles();
-
-    // OR
-    // clear just WiFi credentials
-    DBG.println(F("Wiping WiFi credentials from memory..."));
-    clearPath(getPath(PARAM_WIFI_SSID).c_str());
-    clearPath(getPath(PARAM_WIFI_PASSWORD).c_str());
-
+    DBG.println(F("rebooting..."));
     ESP.restart();
   }
 }
