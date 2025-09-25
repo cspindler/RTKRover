@@ -521,9 +521,25 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   // Check RTK credentials
   bool credentialsExists = true;
   credentialsExists &= !casterHost.isEmpty();
+  if (casterHost.isEmpty())
+  {
+    DBG.println("casterHost.isEmpty() is true.");
+  }
   credentialsExists &= !casterPort.isEmpty();
+  if (casterPort.isEmpty())
+  {
+    DBG.println("casterPort.isEmpty() is true.");
+  }
   credentialsExists &= !casterUser.isEmpty();
+  if (casterUser.isEmpty())
+  {
+    DBG.println("casterUser.isEmpty() is true.");
+  }
   credentialsExists &= !mountPoint.isEmpty();
+  if (mountPoint.isEmpty())
+  {
+    DBG.println("mountPoint.isEmpty() is true.");
+  }
 
   while (!credentialsExists)
   {
@@ -1026,6 +1042,10 @@ void task_bno_orientation_via_ble(void *pvParameters)
         }
         vTaskDelay(TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
         // taskYIELD(); // 11.25 ms is the BLE connection interval, makes no sense to try to send faster
+      if (!bno080.dataAvailable())
+      {
+        DBG.println(F("No BNO080 dataAvailable"));
+      }
      }
     // Delete self task
     vTaskDelete(NULL);
