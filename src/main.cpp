@@ -368,7 +368,6 @@ volatile bool ggaSentenceComplete = false;
 //        |              |          |
 void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 {
-  DBG.println("-- callbackGPGGA called");
   if (xSemaphoreTake(mutexSem, portMAX_DELAY)) {
     memset(ggaSentence, 0, NMEA_GGA_MAX_LENGTH);
     strncpy(ggaSentence, (const char *)nmeaData->nmea, nmeaData->length);
