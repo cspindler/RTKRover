@@ -257,15 +257,7 @@ void setup()
   while (! WiFi.isConnected())
   {
     DBG.println(F("setup(): Not connected to WiFi station"));
-    DBG.printf("WiFi state: %d", WiFi.isConnected());
-    if (WiFi.getMode() == WIFI_AP)
-    {
-      DBG.println(F("Enter Wifi credentials on webform:"));
-      DBG.print(F("Connect yor computer to SSID: "));
-      DBG.println(WiFi.getHostname());
-      DBG.print(F("Go with your Browser to IP: "));
-      DBG.println(WiFi.softAPIP());
-    }
+    DBG.printf("WiFi state: %d", WiFi.status());
     blinkOneTime(1000, false);
     blinkOneTime(100, false);
     setupWiFi();
