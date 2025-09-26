@@ -483,7 +483,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     /** This ist most of the content beginServing() func from the
      * Sparkfun u-blox GNSS Arduino Library/ZED-F9P/Example15-NTRIPClient
      * Because I did not wanted to change the code too much if you want to compare
-     * with the Example14 I used of the "evil" goto as a replace for the return command.
+     * with the Example14: "continue" calls are used in place of "return".
      * (A task must not return.)
      */
 
@@ -508,8 +508,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         {
           DBG.println(F("Connection to caster failed, retry in 5s"));
           vTaskDelay(5000/portTICK_PERIOD_MS);
-
-          goto task_end; // replaces the return command from the SparkFun example (a task must not return)
+          continue; // skip to next iteration and retry
         }
         else
         {
@@ -579,8 +578,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             {
               ntripClient.stop(); // Too many requests with wrong settings will lead to bann, stop here
               DBG.println(F("Caster timed out!"));
-
-              goto task_end;
+              vTaskDelay(5000/portTICK_PERIOD_MS);
+              continue; // skip to next iteration and retry
             }
             vTaskDelay(1000/portTICK_PERIOD_MS);
           }
@@ -614,8 +613,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             DBG.print(casterHost.c_str());
             DBG.print(F(": "));
             DBG.println(response);
-
-            goto task_end; // replaces the return command from the SparkFun example (a task must not return)
+            vTaskDelay(5000/portTICK_PERIOD_MS);
+            continue; // skip to next iteration and retry
           }
           else
           {
@@ -706,8 +705,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // DBG.print(F("task_rtk_get_corrrection_data loop, uxHighWaterMark: "));
       // DBG.println(uxHighWaterMark);
     // } /*** End if (xSemaphoreTake(mutexSem, portMAX_DELAY)) ***/
-
-    task_end:
 
     // Wait a bit before the next request will be started
     vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
