@@ -270,6 +270,9 @@ void setup()
     setupWiFi();
   }
 
+  DBG.print(F("BLE Device name: "));
+  DBG.println(getDeviceName(DEVICE_TYPE));
+
   setupBLE();
 
   setupGNSS();
@@ -385,12 +388,6 @@ void updatePosition()
   int32_t lon = myGNSS.getHighResLongitude();
   int8_t lonHp = myGNSS.getHighResLongitudeHp();
   int32_t accuracy = myGNSS.getPositionAccuracy();
-
-  Serial.print("Latitude: "); Serial.print(lat);
-  Serial.print(", LatHp: "); Serial.print(latHp);
-  Serial.print(", Longitude: "); Serial.print(lon);
-  Serial.print(", LonHp: "); Serial.print(lonHp);
-  Serial.print(", Accuracy: "); Serial.println(accuracy);
 
   coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
   xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
@@ -578,7 +575,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             if (millis() - timeout > CONNECTION_TIMEOUT_MS)
             {
               ntripClient.stop(); // Too many requests with wrong settings will lead to bann, stop here
-              Serial.println(F("Caster timed out!"));
+              DBG.println(F("Caster timed out!"));
 
               goto task_end;
             }
@@ -863,13 +860,13 @@ void task_send_rtk_position_via_ble(void *pvParameters)
       if (xQueueReceive( xQueueAccuracy, &accuracy, ( TickType_t ) 10 ) == pdPASS)
       {
         accuracyStr = String(accuracy);
-        DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
+        // DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
         pRTKAccuracyCharacteristic->setValue(accuracyStr.c_str());
         pRTKAccuracyCharacteristic->notify();
 
-        DBG.print(F("Received accuracy = "));
-        DBG.print(accuracy);
-        DBG.println(F(" mm"));
+        // DBG.print(F("Received accuracy = "));
+        // DBG.print(accuracy);
+        // DBG.println(F(" mm"));
       }
 
       /*  Measure stack size (last was 9356) */
