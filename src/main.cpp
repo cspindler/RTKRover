@@ -263,8 +263,8 @@ void setup()
   blinkOneTime(125, true);
   blinkOneTime(125, true);
   blinkOneTime(125, true);
-  // while ( ! checkConnectionToWifiStation() )
-  while (! WiFi.isConnected())
+
+  while (!WiFi.isConnected())
   {
     DBG.println(F("setup(): Not connected to WiFi station"));
     DBG.printf("WiFi state: %d", WiFi.status());
@@ -288,13 +288,13 @@ void setup()
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
   xQueueSetup();
-/*
+  /*
   Stack sizes of the tasks. You have to measure the used size in the task (set a high value for first run) and
   after that you can reduce the stack size to an fitting smaller value. This have to repeated if
   the task code is changed. There are no rules, just measure and adjust (thats why its a magic number).
   For measurement you need to uncomment the uxHighWaterMark related code in the task (setup and loop).
   After measurement comment out it again.
-*/
+  */
   int stack_size_task_rtk_get_corrrection_data = 1024 * 7;          // Last measurement:
   int stack_size_task_rtk_get_rover_position = 1024 * 7;      // Last measurement: 5844
   int stack_size_task_bno_orientation_via_ble = 1024 * 11;  // Last measurement:
@@ -308,7 +308,7 @@ void setup()
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
   DBG.println(thisBoard);
-}
+} /*** end setup ***/
 
 void loop()
 {
