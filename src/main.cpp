@@ -252,6 +252,9 @@ void setup()
   #if DEBUGGING
   Serial.begin(BAUD);
   while (!Serial) {};
+  DBG.println(F("Press any key to continue..."));
+  while (!Serial.available()) delay(100);
+  while (Serial.available()) Serial.read();
   #endif
 
   setupWiFi();
