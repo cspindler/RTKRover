@@ -246,13 +246,20 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
+  blinkOneTime(1000, true);
+  blinkOneTime(1000, true);
+
   #if DEBUGGING
   Serial.begin(BAUD);
   while (!Serial) {};
   #endif
 
   setupWiFi();
-  delay(1000);
+
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
   // while ( ! checkConnectionToWifiStation() )
   while (! WiFi.isConnected())
   {
