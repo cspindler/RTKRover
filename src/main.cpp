@@ -246,7 +246,7 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  #ifdef DEBUGGING
+  #if DEBUGGING
   Serial.begin(BAUD);
   while (!Serial) {};
   #endif
@@ -305,7 +305,7 @@ void setup()
 
 void loop()
 {
-  #ifdef DEBUGGING
+  #if DEBUGGING
   aunit::TestRunner::run();
   #endif
 }
