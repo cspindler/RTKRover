@@ -355,7 +355,7 @@ bool setupGNSS()
     // Set output in Hz.
     response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ);
     byte rate = myGNSS.getNavigationFrequency(); // Get the update rate of this module
-    DBG.print("Current update rate: ");
+    DBG.print(F("Current update rate: "));
     DBG.println(rate);
 
     response &= myGNSS.setNMEAGPGGAcallbackPtr(&callbackGPGGA); // Set up the callback for GPGGA
@@ -834,13 +834,13 @@ void task_send_rtk_position_via_ble(void *pvParameters)
     {
       if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS)
       {
-        DBG.print("Received coord.lat = ");
+        DBG.print(F("Received coord.lat = "));
         DBG.print(coord.lat);
-        DBG.print(", coord.latHp = ");
+        DBG.print(F(", coord.latHp = "));
         DBG.print(coord.latHp);
-        DBG.print(" coord.lon = ");
+        DBG.print(F(" coord.lon = "));
         DBG.print(coord.lon);
-        DBG.print(", coord.lonHp = ");
+        DBG.print(F(", coord.lonHp = "));
         DBG.println(coord.lonHp);
         lat = coord.lat;
         latHp = coord.latHp;
