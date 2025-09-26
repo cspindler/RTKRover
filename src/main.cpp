@@ -265,6 +265,8 @@ void setup()
 
   setupBLE();
 
+  setupGNSS();
+
   DBG.print(F("Device type: ")); DBG.println(DEVICE_TYPE);
   DBG.print(F("Battery: "));
   DBG.print(getBatteryVolts());
@@ -434,15 +436,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 {
   (void)pvParameters;
 
-  if (!setupGNSS())
-  {
-    DBG.println("setupGNSS() failed! Freezing...");
-    while (true)
-    {
-      // TODO: this part requires a procedure to recover from setup failure!
-      blinkOneTime(1000, true);
-    }
-  };
   //=========================================================================
   // 5 RTCM messages take approximately ~300ms to arrive at 115200bps
   long lastReceivedRTCM_ms = 0;
