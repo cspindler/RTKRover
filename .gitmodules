@@ -1,9 +1,0 @@
-[submodule "lib/ESPAsyncWebServer"]
-	path = lib/ESPAsyncWebServer
-	url = https://github.com/me-no-dev/ESPAsyncWebServer.git
-	branch = master
-	
-[submodule "lib/RTKRoverManager"]
-	path = lib/RTKRoverManager
-	url = https://github.com/jangleboom/RTKRoverManager.git
-	branch = main

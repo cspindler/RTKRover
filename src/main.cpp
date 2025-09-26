@@ -36,10 +36,8 @@
 #include <sdkconfig.h>
 #include <RTKRoverConfig.h>
 #include <CasterSecrets.h>
-#include <RTKRoverManager.h>
+#include <handle_wifi.h>
 #include <TestsRTKRover.h>
-
-using namespace RTKRoverManager;
 
 /*
 =================================================================================
@@ -48,7 +46,7 @@ using namespace RTKRoverManager;
 */
 #include "Button2.h"
 
-// Button to press to wipe out stored WiFi credentials
+// Button to press to reboot the device
 Button2 rebootButton = Button2(REBOOT_BUTTON_PIN, INPUT, false, false);
 
 void buttonHandler(Button2 &btn);
@@ -66,14 +64,6 @@ void buttonHandler(Button2 &btn);
  * @return float Battery voltage
  */
 float getBatteryVolts(void);
-
-/*
-=================================================================================
-                                WiFi
-=================================================================================
-*/
-AsyncWebServer server(80);
-String scannedSSIDs[MAX_SSIDS];
 
 /*
 =================================================================================
@@ -261,37 +251,7 @@ void setup()
   while (!Serial) {};
   #endif
 
- //===============================================================================
-  // Initialize LittleFS
-  // Use board_build.partitions in platformio.ini
-  if (!setupLittleFS())
-  {
-    formatLittleFS();
-    if (!setupLittleFS()) while (true) {};
-  }
-
-  // The following function clear the file system and that will cause a setup as AP to enter new data
-
-  // Uncomment if you want to format (e. g after changing partition sizes)
-  // (And dont forget to comment this again after one run ;)
-  //formatLittleFS();
-
-  // wipeWiFiCredentials();  // Use this for deleting WiFi data only
-  // wipeLittleFSFiles();  // Use this for deleting all data
-#ifdef DEBUGGING
-  listFiles();
-  delay(3000);
-#endif
-
-  //===============================================================================
-  // Read Wifi credentials from header and save them into LittleFS, so the RTKRoverManger
-  // needs no API change for this special use case in Basel 01/2023
-  // (Reason: Users could accidentally press the wipe button)
-  writeFile(LittleFS, getPath(PARAM_WIFI_SSID).c_str(), kWifiSsid);
-  writeFile(LittleFS, getPath(PARAM_WIFI_PASSWORD).c_str(), kWifiPw);
-  writeFile(LittleFS, getPath(PARAM_DEVICE_NAME).c_str(), kDeviceName);
-
-  setupWiFi(&server);
+  setupWiFi();
   delay(1000);
   // while ( ! checkConnectionToWifiStation() )
   while (! WiFi.isConnected())
@@ -308,7 +268,7 @@ void setup()
     }
     blinkOneTime(1000, false);
     blinkOneTime(100, false);
-    setupWiFi(&server);
+    setupWiFi();
   }
 
   setupBLE();
@@ -491,15 +451,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       blinkOneTime(1000, true);
     }
   };
-
-  while ( ! checkConnectionToWifiStation() )
-  {
-    DBG.println(F("task setup: Not connected to WiFi station"));
-    blinkOneTime(1000, true);
-    blinkOneTime(100, true);
-  }
-
-//=========================================================================
+  //=========================================================================
   // 5 RTCM messages take approximately ~300ms to arrive at 115200bps
   long lastReceivedRTCM_ms = 0;
   // If we fail to get a complete RTCM frame after 10s, then disconnect from caster
@@ -515,31 +467,15 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   String casterHost = kCasterHost;
   String casterPort = kCasterPort;
   String casterUser = kCasterUser;
-  String mountPoint =  kMountPoint;
-  String casterUserPW = kCasterUserPw;
+  String casterPass = kCasterPass;
+  String mountPoint = kMountPoint;
 
   // Check RTK credentials
   bool credentialsExists = true;
   credentialsExists &= !casterHost.isEmpty();
-  if (casterHost.isEmpty())
-  {
-    DBG.println("casterHost.isEmpty() is true.");
-  }
   credentialsExists &= !casterPort.isEmpty();
-  if (casterPort.isEmpty())
-  {
-    DBG.println("casterPort.isEmpty() is true.");
-  }
   credentialsExists &= !casterUser.isEmpty();
-  if (casterUser.isEmpty())
-  {
-    DBG.println("casterUser.isEmpty() is true.");
-  }
   credentialsExists &= !mountPoint.isEmpty();
-  if (mountPoint.isEmpty())
-  {
-    DBG.println("mountPoint.isEmpty() is true.");
-  }
 
   while (!credentialsExists)
   {
@@ -562,9 +498,12 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (ntripClient.connected() == false)
       {
         // First check WiFi connection
-        while ( ! checkConnectionToWifiStation() )
+        while (!WiFi.isConnected())
         {
-          DBG.println(F("task loop: Not connected to WiFi station"));
+          DBG.println(F("task_rtk_get_corr_data loop: Not connected to WiFi station"));
+          DBG.printf("WiFi state: %d", WiFi.status());
+          DBG.println();
+          setupStationMode(kWifiSsid, kWifiPw);
           blinkOneTime(1000, false);
           blinkOneTime(100, false);
         }
@@ -604,8 +543,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           else
           {
             //Pass base64 encoded user:pw
-            char userCredentials[(casterUser.length()+1) + sizeof(casterUserPW) + 1]; //The ':' takes up a spot
-            snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser.c_str(), casterUserPW);
+            char userCredentials[(casterUser.length()+1) + sizeof(casterPass) + 1]; //The ':' takes up a spot
+            snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser.c_str(), casterPass);
 
             DBG.print(F("Sending credentials: "));
             DBG.println(userCredentials);
@@ -1079,12 +1018,6 @@ void buttonHandler(Button2 &btn)
     DBG.println(F("rebooting..."));
     ESP.restart();
   }
-}
-
-void wipeWiFiCredentials()
-{
-  clearPath(getPath(PARAM_WIFI_SSID).c_str());
-  clearPath(getPath(PARAM_WIFI_PASSWORD).c_str());
 }
 
 void blinkOneTime(int blinkTime, bool doNotBlock)
