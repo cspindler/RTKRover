@@ -6,8 +6,7 @@
  * @brief This is part of a distributed software, here: head tracker and GNSS
  *        positioning using Sparkfun Real Time Kinematics
  * <br>
- * @todo  - Task to check / reconnect WiFi (independent of head tracking)
- *        - Upgrade to Sparkfun RTK Library v3
+ * @todo  - Upgrade to Sparkfun RTK Library v3
  *        - Calibration button (?)
  *        - Test: BNO080 found/connected
  *        - Test: BLE
