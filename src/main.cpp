@@ -30,7 +30,8 @@
 #include <BLEDevice.h>
 #include <BLE2902.h>
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h>
-#include <SparkFun_BNO080_Arduino_Library.h>
+/*#include <SparkFun_BNO080_Arduino_Library.h>*/
+#include <SparkFun_BNO08x_Arduino_Library.h>  // http://librarymanager/All#SparkFun_BNO08x
 #include <utility/imumaths.h>
 #include <sdkconfig.h>
 #include <RTKRoverConfig.h>
@@ -129,7 +130,8 @@ void setupBLE(void);
                                 BNO080
 =================================================================================
 */
-BNO080 bno080;
+/* BNO080 bno080; */
+BNO08x bno080;
 void setupBNO080(void);
 
 /*
@@ -220,6 +222,13 @@ void task_send_rtk_position_via_ble(void *pvParameters);
 void task_bno_orientation_via_ble(void *pvParameters);
 
 /**
+ * @brief Task that blinks the LED
+ *
+ * @param pvParameters Void pointer, no parameter used here
+ */
+void task_blink_led(void *pvParameters);
+
+/**
  * @brief Create the queues with the right size
  *
  */
@@ -245,8 +254,8 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  blinkOneTime(1000, true);
-  blinkOneTime(1000, true);
+  blinkOneTime(1000, false);
+  blinkOneTime(1000, false);
 
   #if DEBUGGING
   Serial.begin(BAUD);
@@ -258,17 +267,17 @@ void setup()
 
   setupWiFi();
 
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
+  blinkOneTime(125, false);
+  blinkOneTime(125, false);
+  blinkOneTime(125, false);
+  blinkOneTime(125, false);
 
   while (!WiFi.isConnected())
   {
     DBG.println(F("setup(): Not connected to WiFi station"));
     DBG.printf("WiFi state: %d", WiFi.status());
     blinkOneTime(1000, false);
-    blinkOneTime(100, false);
+    blinkOneTime(100 , false);
     setupWiFi();
   }
 
@@ -283,6 +292,8 @@ void setup()
   DBG.print(F("Battery: "));
   DBG.print(getBatteryVolts());
   DBG.println(" V");
+
+  rebootButton.setPressedHandler(buttonHandler);
 
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
@@ -303,6 +314,7 @@ void setup()
   xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, NULL, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
   xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
+  xTaskCreate( &task_blink_led, "task_blink_led", 1024 * 2, NULL, 0, NULL);
 
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
@@ -314,6 +326,7 @@ void loop()
   #if DEBUGGING
   aunit::TestRunner::run();
   #endif
+  rebootButton.loop();
 }
 
 /*
@@ -454,6 +467,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   // Measure stack size
   UBaseType_t uxHighWaterMark;
 
+  // TODO begin: refactor
   // Read RTK credentials
   String casterHost = kCasterHost;
   String casterPort = kCasterPort;
@@ -473,6 +487,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     DBG.println(F("RTK credentials incomplete!\nFreezing RTK task."));
     blinkOneTime(2000, true);
   }
+  // TODO end: refactor
 
   WiFiClient ntripClient;
   long rtcmCount = 0;
@@ -496,8 +511,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.printf("WiFi state: %d", WiFi.status());
         DBG.println();
         setupStationMode(kWifiSsid, kWifiPw);
-        blinkOneTime(1000, false);
-        blinkOneTime(100, false);
+        blinkOneTime(1000, false); // should this be non-blocking?
+        blinkOneTime(100 , false); // should this be non-blocking?
       }
 
       DBG.print(F("Opening socket to "));
@@ -783,6 +798,8 @@ void setupBNO080()
     delay(500);
   }
 
+  bno080.enableDebugging();
+
   // Activate IMU functionalities
   bno080.enableARVRStabilizedRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
   // bno080.enableARVRStabilizedGameRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
@@ -797,6 +814,7 @@ void setupBNO080()
   // bno080.enableStepCounter(32);
 }
 
+// TODO: why is this in a function?
 void xQueueSetup()
 {
   xQueueCoord  = xQueueCreate( QUEUE_SIZE, sizeof( coord_t ) );
@@ -878,6 +896,9 @@ void task_send_rtk_position_via_ble(void *pvParameters)
     else
     {
       blinkOneTime(100, true);
+      blinkOneTime(100, true);
+      blinkOneTime(100, true);
+      vTaskDelay(1000/portTICK_PERIOD_MS);
     }
 
 
@@ -922,9 +943,17 @@ void task_bno_orientation_via_ble(void *pvParameters)
     }
     else
     {
+      if (bno080.wasReset()) {
+        DBG.println(F("BNO086 sensor was reset"));
+        setupBNO080();
+      }
       // TODO: Separate reading values from sending values
-      if (bno080.dataAvailable())
+      if (bno080.getSensorEvent())
       {
+        if (bno080.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR)
+        {
+          DBG.println(F("Got new rotation vector data"));
+        }
         quatI = bno080.getQuatI();
         quatJ = bno080.getQuatJ();
         quatK = bno080.getQuatK();
@@ -970,15 +999,29 @@ void task_bno_orientation_via_ble(void *pvParameters)
       }
       vTaskDelay(TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
       // taskYIELD(); // 11.25 ms is the BLE connection interval, makes no sense to try to send faster
-    if (!bno080.dataAvailable())
+    /* if (!bno080.getSensorEvent())
     {
       DBG.println(F("No BNO080 dataAvailable"));
-    }
+    } */
     }
   // Delete self task
   vTaskDelete(NULL);
 
 } /*** end task_bno_orientation_via_ble ***/
+
+void task_blink_led(void *pvParameters)
+{
+  (void)pvParameters;
+
+  while (true)
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay(100/portTICK_PERIOD_MS);
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay(1900/portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
 
 /*
 =================================================================================
