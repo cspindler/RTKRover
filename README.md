@@ -77,10 +77,46 @@ If you have the Arduino IDE installed, you can borrow it from there too. On macO
 
 Update the serial-port paths in [`platformio.ini`](./platformio.ini) to the values read from PlatformIO "Devices" command (`platformio device list`).
 
-### ESP32 board LED error codes
+### ESP32 board (red) LED codes
 
-* 0.1 s BLE: not connected
-* 0.5 s RTK: setupGNSS() failed (I2C setup)
-* 1.0 s RTK: setupGNSS() failed (I2C communication)
-* 2.0 s RTK: credentialsExists false
-* 1.0 s : 0.1 s WiFi: connection to AP lost
+![blink-codes](./assets/blink-codes.svg)
+
+#### Startup
+
+* 1.0s 2x: started setup (blocking)
+* 0.125s 2x 1.0s 1x (watch for this to spot reboots) (blocking)
+* `setupWiFi`
+* 0.125s 4x (blocking)
+* while wait for WiFi Connection
+  * 1.0s, 0.1s (blocking)
+* `setupBLE` no blinking
+* `setupGNSS`
+  * while myGNSS.begin
+    * 0.5s: setupGNSS() failed (I2C setup) (blocking)
+* FreeRTOS queues and tasks setup
+
+#### Runtime
+
+> legacy, check if still applicable
+>
+> * 1.0 s RTK: setupGNSS() failed (I2C communication)
+> * 2.0 s RTK: credentialsExists false
+
+`task_rtk_get_corrrection_data`
+
+* no credentials (needs to removed)
+* while wait for WiFi Connection
+  * 1.0s, 0.1s: connection to AP lost (blocking)
+
+`task_send_rtk_position_via_ble`
+
+* while (!bleConnected)
+  * 0.1s (non-blocking)
+* when not connected in while-loop
+  * 3x 0.1s, 1.0s wait
+
+### ESP32 board (yellow) LED codes
+
+* flashing: running on USB power
+* steady: Charging
+* off: fully charged
