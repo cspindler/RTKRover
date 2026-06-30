@@ -116,14 +116,8 @@ PMCID: PMC9123378. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9123378/
 =================================================================================
 */
 // Button to press to wipe out stored WiFi and RTK credentials
-#define WIPE_BUTTON_PIN                    15
+#define REBOOT_BUTTON_PIN                    15
 
 // Reset button is just a hardware connection (EN -> GND)
 
 #endif /*** RTK_ROVER_CONFIG_H ***/
-
-
-
-
-
-
