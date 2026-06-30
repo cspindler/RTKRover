@@ -78,6 +78,11 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define BNO080_LIN_ACCEL_UPDATE_RATE_MS 10      // 100 Hz
 #define BNO080_STEP_CNT_UPDATE_RATE_MS  32      // 31.25 Hz lt. datasheet
 
+// #define BNO08X_INT  A4
+#define BNO08X_INT  -1
+// #define BNO08X_RST  A5
+#define BNO08X_RST  -1
+
 /*
 =================================================================================
                                 FreeRTOS settings
@@ -116,14 +121,8 @@ PMCID: PMC9123378. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9123378/
 =================================================================================
 */
 // Button to press to wipe out stored WiFi and RTK credentials
-#define WIPE_BUTTON_PIN                    15
+#define REBOOT_BUTTON_PIN                    15
 
 // Reset button is just a hardware connection (EN -> GND)
 
 #endif /*** RTK_ROVER_CONFIG_H ***/
-
-
-
-
-
-
