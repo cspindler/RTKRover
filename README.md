@@ -51,20 +51,17 @@ If you are NOT using the web form of the RTKBaseManager, then to connect to a ca
 ```cpp
 #ifndef CASTER_SECRETS_H
 #define CASTER_SECRETS_H
-// A place for your caster credentials
-
-// RTK2Go http://www.rtk2go.com:2101/SNIP::STATUS#uptime
-
 const char kCasterHost[] = "rtk2go.com";
 const char kCasterPort[] = "2101";
 const char kMountPoint[] = "YOUR_MOUNT_POINT";
-const char kCasterUser[] = "YOUR_USER_EMAIL";           // User must provide their own email address to use RTK2Go
-const char kCasterUserPw[] = "";                        // Not neccecary, more info: rtk2go.com
+const char kCasterUser[] = "YOUR_USER_EMAIL";        // User must provide their own email address to use RTK2Go
+const char kCasterPass[] = "";                       // Not neccecary, more info: rtk2go.com
 
 // Device name
-const char kDeviceName[] = "rover123";                  // E. g.
-// Wifi access
-const char kWifiSsid[] = "YOUR_SSID_WITHOUT_SPACES";    // Wifi to connect the rover with
+const char kDeviceName[] = "YOUR_DEVICE_NAME";
+
+// WiFi access
+const char kWifiSsid[] = "YOUR_SSID_WITHOUT_SPACES"; // Wifi to connect the rover with
 const char kWifiPw[] = "YOUR_WIFI_PASSWORD";
 
 #endif /*** CASTER_SECRETS_H ***/

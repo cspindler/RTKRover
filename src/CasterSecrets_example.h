@@ -13,14 +13,14 @@
 const char kCasterHost[] = "rtk2go.com";
 const char kCasterPort[] = "2101";
 const char kMountPoint[] = "YOUR_MOUNT_POINT";
-const char kCasterUser[] = "YOUR_USER_EMAIL";   // User must provide their own email address to use RTK2Go
-const char kCasterPass[] = "";                  // Not neccecary, more info: rtk2go.com
+const char kCasterUser[] = "YOUR_USER_EMAIL";        // User must provide their own email address to use RTK2Go
+const char kCasterPass[] = "";                       // Not neccecary, more info: rtk2go.com
 
 // Device name
-const char kDeviceName[] = "roverli";
+const char kDeviceName[] = "YOUR_DEVICE_NAME";
 
 // WiFi access
-const char kWifiSsid[] = "hotspot";             // Wifi to connect the rover with
-const char kWifiPw[] = "psk";
+const char kWifiSsid[] = "YOUR_SSID_WITHOUT_SPACES"; // Wifi to connect the rover with
+const char kWifiPw[] = "YOUR_WIFI_PASSWORD";
 
 #endif /*** CASTER_SECRETS_H ***/
