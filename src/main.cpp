@@ -256,6 +256,11 @@ void setup()
   while (Serial.available()) Serial.read();
   #endif
 
+  // blink sequence before starting WiFi and BLE
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
+  blinkOneTime(2000, true);
+
   setupWiFi();
 
   blinkOneTime(125, true);
