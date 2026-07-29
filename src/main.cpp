@@ -605,7 +605,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         const int SERVER_BUFFER_SIZE = 512;
         char serverRequest[SERVER_BUFFER_SIZE];
 
-        snprintf(serverRequest, SERVER_BUFFER_SIZE, "GET /%s HTTP/1.0\r\nUser-Agent: NTRIP SparkFun u-blox Client v1.0\r\n",
+        int requestLen = snprintf(serverRequest, SERVER_BUFFER_SIZE, "GET /%s HTTP/1.0\r\nUser-Agent: NTRIP SparkFun u-blox Client v1.0\r\n",
                 mountPoint.c_str());
 
         char credentials[512];
@@ -616,8 +616,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         else
         {
           //Pass base64 encoded user:pw
-          char userCredentials[(casterUser.length()+1) + sizeof(casterPass) + 1]; //The ':' takes up a spot
-          snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser.c_str(), casterPass);
+          // length(), not sizeof: sizeof(String) is the object size (~16 B),
+          // not the stored text, and %s must get c_str(), never the object.
+          char userCredentials[casterUser.length() + 1 + casterPass.length() + 1]; //The ':' takes up a spot
+          snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser.c_str(), casterPass.c_str());
 
           DBG.print(F("Sending credentials: "));
           DBG.println(userCredentials);
@@ -637,10 +639,29 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           #endif
         }
 
-        // This warning comes because source and destination have the same size,
-        // but it is large enough and the buffer should not be full at any time.
-        strncat(serverRequest, credentials, SERVER_BUFFER_SIZE);
-        strncat(serverRequest, "\r\n", SERVER_BUFFER_SIZE);
+        // Append with the REMAINING space as the bound. The previous
+        // strncat(dst, src, SERVER_BUFFER_SIZE) bounded by the full
+        // destination size (-Wstringop-overflow) and could smash this
+        // task's stack. snprintf also reports truncation, which strncat
+        // cannot - and a truncated request must not be sent: it would
+        // carry broken headers and fail at the caster anyway.
+        bool requestFits = requestLen > 0 && requestLen < SERVER_BUFFER_SIZE;
+        if (requestFits)
+        {
+          int appended = snprintf(serverRequest + requestLen,
+                                  SERVER_BUFFER_SIZE - requestLen,
+                                  "%s\r\n", credentials);
+          requestFits = appended >= 0 && appended < SERVER_BUFFER_SIZE - requestLen;
+        }
+        if (!requestFits)
+        {
+          DBG.println(F("NTRIP server request exceeds buffer, not sent. Check mount point / credential lengths."));
+          telemetryEmitError(2, "ntrip_request_overflow",
+                             "caster request exceeds buffer; check mount point / credential lengths");
+          ntripClient.stop();
+          vTaskDelay(5000/portTICK_PERIOD_MS);
+          continue; // retry loop; config is wrong, but never overflow
+        }
         DBG.printf("serverRequest len: %d ", strlen(serverRequest));
         DBG.print(F("serverRequest size: "));
         DBG.print(strlen(serverRequest));
