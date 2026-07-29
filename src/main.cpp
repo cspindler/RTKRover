@@ -483,7 +483,17 @@ void updatePosition()
   int32_t accuracy = myGNSS.getPositionAccuracy();
 
   coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
-  xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
+  // Only stream positions the walk may trust: MIN_ACCEPTABLE_ACCURACY_MM
+  // was documented in the config but never enforced. When accuracy
+  // degrades past it the position stream simply goes quiet, ubloxUpdatedAt
+  // on the phone goes stale, and the app falls back to internal GPS after
+  // its 3 s freshness window - degraded RTK and lost RTK use the same
+  // fallback, no extra protocol. The 1 Hz gnss_fix telemetry below is
+  // deliberately NOT gated: the dead-zone dataset needs the bad fixes too.
+  if (accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM)
+  {
+    xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
+  }
 
   // Send accuracy if changed only
   if (accuracy != old_accuracy)
