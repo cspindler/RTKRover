@@ -15,4 +15,8 @@ test(incorrect) {
   assertNotEqual(x, 1);
 }
 
+#ifdef TESTING
+#include "telemetry/TestsTelemetry.h"
+#endif
+
 #endif /*** TESTS_RTK_ROVER_MANAGER_H ***/

@@ -256,6 +256,19 @@ void setup()
   while (Serial.available()) Serial.read();
   #endif
 
+  #ifdef TESTING
+  // Run the AUnit tests here rather than relying on loop(): with no WiFi
+  // hotspot in range setup() blocks forever below, so loop() (the usual
+  // AUnit driver) may never run. All tests are synchronous; a bounded
+  // number of passes resolves them all and prints the summary to serial.
+  DBG.println(F("Running unit tests..."));
+  for (int i = 0; i < 100; i++)
+  {
+    aunit::TestRunner::run();
+    delay(2);
+  }
+  #endif
+
   // blink sequence before starting WiFi and BLE
   blinkOneTime(125, true);
   blinkOneTime(125, true);

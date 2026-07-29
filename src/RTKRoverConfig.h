@@ -8,6 +8,27 @@
 
 /*
 =================================================================================
+                                Firmware version
+=================================================================================
+*/
+
+// Semver base; bump on feature/breaking changes. The full FW_VERSION reported
+// in telemetry heartbeats is FW_VERSION_BASE "+" <git hash>, composed in
+// src/telemetry/telemetry.h from the build-time generated header.
+#define FW_VERSION_BASE               "0.44.0"
+
+/*
+=================================================================================
+                                Telemetry (PROJECT-PLAN.md par. 4-5)
+=================================================================================
+*/
+
+#define TELEMETRY_RING_SIZE           8192  // bytes; drop-oldest on overflow
+#define TELEMETRY_MAX_FRAME           192   // largest single frame incl. 3 B header
+                                            // (error event worst case; fits MTU 185)
+
+/*
+=================================================================================
                                 Serial settings
 =================================================================================
 */

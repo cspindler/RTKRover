@@ -1,0 +1,87 @@
+/*******************************************************************************
+ * @file telemetry_keys.h
+ * @brief CBOR key table for the BLE telemetry feed.
+ *
+ * CROSS-REPO CONTRACT (PROJECT-PLAN.md par. 5.3). Mirrored in rwa-client as
+ * TelemetryKeys.swift. Never renumber or reuse a retired key within a type;
+ * new fields get new keys, new event types get the next free type value.
+ ******************************************************************************/
+#ifndef TELEMETRY_KEYS_H
+#define TELEMETRY_KEYS_H
+
+#include <stdint.h>
+
+// Frame header: [u8 proto_version][u16 length LE][CBOR payload]
+#define TELEMETRY_PROTO_VERSION       1
+
+// Event types (common key 0)
+enum TelemetryEventType : uint8_t {
+  TELEM_TYPE_GNSS_FIX     = 1,
+  TELEM_TYPE_HEARTBEAT    = 2,
+  TELEM_TYPE_NTRIP_STATUS = 3,
+  TELEM_TYPE_IMU_STATUS   = 4,
+  TELEM_TYPE_ERROR        = 5,
+};
+
+// Common keys (every event)
+enum TelemetryCommonKey : uint8_t {
+  TELEM_KEY_TYPE     = 0,  // uint (TelemetryEventType)
+  TELEM_KEY_SEQ      = 1,  // uint, monotonic per boot
+  TELEM_KEY_T_DEV_MS = 2,  // uint, millis since boot
+};
+
+// gnss_fix (type 1)
+enum TelemetryGnssFixKey : uint8_t {
+  TELEM_GNSS_LAT         = 10,  // double, degrees
+  TELEM_GNSS_LON         = 11,  // double, degrees
+  TELEM_GNSS_HEIGHT_M    = 12,  // float, ellipsoidal
+  TELEM_GNSS_FIX_TYPE    = 13,  // uint, UBX fixType
+  TELEM_GNSS_CARR_SOLN   = 14,  // uint: 0 none, 1 RTK float, 2 RTK fixed
+  TELEM_GNSS_H_ACC_MM    = 15,  // uint
+  TELEM_GNSS_V_ACC_MM    = 16,  // uint
+  TELEM_GNSS_NUM_SV      = 17,  // uint
+  TELEM_GNSS_PDOP        = 18,  // float
+  TELEM_GNSS_CORR_AGE_MS = 19,  // uint, 0xFFFFFFFF = never
+};
+
+// heartbeat (type 2)
+enum TelemetryHeartbeatKey : uint8_t {
+  TELEM_HB_UPTIME_MS       = 10,  // uint
+  TELEM_HB_FREE_HEAP       = 11,  // uint
+  TELEM_HB_WIFI_RSSI       = 12,  // int, dBm
+  TELEM_HB_NTRIP_CONNECTED = 13,  // bool
+  TELEM_HB_FW_VERSION      = 14,  // text
+  TELEM_HB_DROPPED_FRAMES  = 15,  // uint, cumulative since boot
+};
+
+// ntrip_status (type 3)
+enum TelemetryNtripStatusKey : uint8_t {
+  TELEM_NTRIP_STATE      = 10,  // uint (TelemetryNtripState)
+  TELEM_NTRIP_RECONNECTS = 11,  // uint
+  TELEM_NTRIP_BYTES_RX   = 12,  // uint, cumulative
+};
+
+enum TelemetryNtripState : uint8_t {
+  TELEM_NTRIP_DISCONNECTED = 0,
+  TELEM_NTRIP_CONNECTED    = 1,
+  TELEM_NTRIP_RECONNECTING = 2,
+};
+
+// imu_status (type 4)
+enum TelemetryImuStatusKey : uint8_t {
+  TELEM_IMU_CALIB_STATUS   = 10,  // uint
+  TELEM_IMU_REPORT_RATE_HZ = 11,  // float
+  TELEM_IMU_RESETS         = 12,  // uint
+};
+
+// error (type 5)
+enum TelemetryErrorKey : uint8_t {
+  TELEM_ERR_SEVERITY = 10,  // uint: 1 warn, 2 error, 3 fatal
+  TELEM_ERR_CODE     = 11,  // text, <= TELEMETRY_ERR_CODE_MAX bytes
+  TELEM_ERR_MSG      = 12,  // text, <= TELEMETRY_ERR_MSG_MAX bytes
+};
+
+#define TELEMETRY_ERR_CODE_MAX  32
+#define TELEMETRY_ERR_MSG_MAX   120  // BLE-leg cap (PROJECT-PLAN.md par. 5.2)
+
+#endif /*** TELEMETRY_KEYS_H ***/

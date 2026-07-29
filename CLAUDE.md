@@ -15,7 +15,7 @@ semantics here without updating PROJECT-PLAN.md and the `rwa-client` decoder.
 
 ## Runtime architecture
 
-(TODO)
+TODO, see [DOCUMENTATION.md]([./DOCUMENTATION.md]) for an attempt of documenting this.
 
 ## Build & flash
 
@@ -103,6 +103,25 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 
 - RAM is tight: BLE + WiFi coexist. Prefer static allocation; check free heap
   impact of any new buffer. The telemetry ring buffer is capped at ~8 KB.
+- Never log with blocking printf from time-critical tasks; route through the
+  telemetry ring buffer (or ESP_LOG for local-USB debugging only).
+- Error events use stable short `code` strings (e.g. `i2c_timeout_bno080`) — these
+  become Grafana alert dimensions; don't rename casually.
+- Versioning: `fw_version` = semver + short git hash, embedded at build time and
+  reported in every heartbeat event.
+- Partition table: two-OTA-slot scheme (ota_0/ota_1 + otadata) is the target for
+  deployed builds, but the tree currently ships `no_ota.csv`. **Blocking conflict:**
+  the app is already ~1.63 MB (77.7 % of the 2 MB single slot), so the stock
+  `default.csv` (1.25 MB per OTA slot) will not link. Moving to OTA needs
+  `min_spiffs.csv` (~1.9 MB/slot) or a custom table — decide before item 5 in the
+  work queue.
 - Flash headroom is the binding budget, not just RAM (RAM is at 18 %). Check the
   `Flash:` line of every `pio run` and flag growth toward the slot ceiling.
 
+## Current work queue
+
+1. Telemetry GATT service (TX notify + CTRL write characteristics)
+2. Ring buffer + telemetry task; CBOR encoding with short integer keys
+3. Event emitters: gnss_fix (1 Hz), heartbeat (15 s), ntrip_status, imu_status, error
+4. CTRL commands: set verbosity, status dump
+5. OTA partition table + version embedding
