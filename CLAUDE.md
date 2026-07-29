@@ -87,6 +87,18 @@ each fail in their own way, and bundling them hid which one broke:
   with "Failed to connect", the board needs the physical BOOT button held —
   that requires the operator, so ask rather than retrying in a loop.
 
+### What is needed from the operator
+
+Hardware-in-the-loop iteration needs, once per machine/session:
+
+1. The board physically plugged in over USB (nothing else is a substitute, the
+   port cannot be reached remotely).
+2. `src/CasterSecrets.h` present (gitignored; copy from `CasterSecrets_example.h`)
+   and a reachable WiFi/NTRIP caster.
+3. Mobile device with RWA Client running, provding the WiFi hotpot:
+   - Add WiFi name to `src/CasterSecrets.h` (or the other way around: Set WiFi name in caster secrets and set your mobile-device / hotspot name to the same).
+   - Add `rtkrover-<esp32-slug>` as headtracker (BT) name in RWA Player, `<esp32-slug>` being the last 6 characters of the ESP32 serial number (i.e. `2d3810`)
+
 ## Conventions & constraints
 
 - RAM is tight: BLE + WiFi coexist. Prefer static allocation; check free heap
