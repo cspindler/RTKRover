@@ -102,7 +102,11 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 ## Conventions & constraints
 
 - RAM is tight: BLE + WiFi coexist. Prefer static allocation; check free heap
-  impact of any new buffer. The telemetry ring buffer is capped at ~8 KB.
+  impact of any new buffer. The telemetry ring buffer is capped at 4 KB
+  (8 KB caused connect-time OOM panics, measured 2026-07-29). Steady-state
+  free heap is ~18 KB with ~13 KB min — verify with the debug build's 10 s
+  heap/stack-watermark report before adding buffers, and keep task stacks
+  sized from measured watermarks (see setup() comment in main.cpp).
 - Never log with blocking printf from time-critical tasks; route through the
   telemetry ring buffer (or ESP_LOG for local-USB debugging only).
 - Error events use stable short `code` strings (e.g. `i2c_timeout_bno080`) — these
@@ -117,6 +121,18 @@ Hardware-in-the-loop iteration needs, once per machine/session:
   work queue.
 - Flash headroom is the binding budget, not just RAM (RAM is at 18 %). Check the
   `Flash:` line of every `pio run` and flag growth toward the slot ceiling.
+- **Memory escalation ladder** (decided 2026-07-29; context: Arduino framework
+  ships ESP-IDF 4.4.7 precompiled, so IDF config like Bluedroid pools and WiFi
+  buffer counts is NOT tunable here — no `menuconfig`). If heartbeat telemetry
+  shows sustained free-heap minimums under ~6–8 KB, escalate in this order;
+  do not jump straight to an IDF migration:
+  1. Port BLE to NimBLE-Arduino (stays in Arduino; frees ~30–50 KB heap AND
+     ~100 KB flash, which also helps the OTA slot conflict above). Expected
+     first lever.
+  2. Rebuild as "Arduino as an IDF component" (code unchanged, unlocks
+     `sdkconfig`/menuconfig for IDF memory knobs).
+  3. Full IDF rewrite — effectively never justified; option 2 provides the
+     same knobs without one.
 
 ## Current work queue
 
