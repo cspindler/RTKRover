@@ -903,6 +903,12 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       }
     }   // End (ntripClient.connected() == true)
 
+    // Dispatch pending NMEA callbacks every iteration, or callbackGPGGA never
+    // refreshes ggaSentenceComplete after the connect-time call above and the
+    // VRS caster drops us for not sending GGA. Must stay OUTSIDE mutexSem:
+    // no I2C here, and callbackGPGGA takes the (non-recursive) mutex itself.
+    myGNSS.checkCallbacks();
+
     //Provide the caster with our current position as needed
     if (ntripClient.connected() == true && (millis() - lastTransmittedGGA_ms) > timeBetweenGGAUpdate_ms)
     {

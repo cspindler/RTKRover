@@ -67,6 +67,12 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   - Verified on hardware: getters now 0-1 ms every emit (was bursts to ~2 s),
     gnss_fix steady at 1 Hz, position frames and GGA push unaffected, heap
     unchanged (auto mode reuses the packet structs polling already allocated).
+- Send GGA to the caster periodically, not just once per connection:
+  `checkCallbacks()` was only invoked in the NTRIP connect success path, so
+  `callbackGPGGA` never fired again after connect, `ggaSentenceComplete` stayed
+  false, and the 10 s GGA-push block never ran. The VRS caster dropped the
+  session every ~40 s for lack of GGA, forcing a silent reconnect that
+  interrupted RTCM delivery.
 
 ### Fixed
 
