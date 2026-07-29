@@ -330,10 +330,19 @@ void setup()
   For measurement you need to uncomment the uxHighWaterMark related code in the task (setup and loop).
   After measurement comment out it again.
   */
-  int stack_size_task_rtk_get_corrrection_data = 1024 * 7;          // Last measurement:
-  int stack_size_task_rtk_get_rover_position = 1024 * 7;      // Last measurement: 5844
-  int stack_size_task_bno_orientation_via_ble = 1024 * 11;  // Last measurement:
-  int stack_size_task_send_rtk_position_via_ble = 1024 * 10;     // Last measurement: 9480
+  /*
+  Sizes from the 2026-07-29 watermark measurement (debug loop() prints
+  "stack min free" every 10 s = bytes of stack never touched). Kept margin is
+  ~2 KB over observed peak use; the FreeRTOS stack canary turns an undersized
+  stack into a loud "Stack canary watchpoint triggered" panic on the bench,
+  not silent corruption. Total 21 KB, down from 35 KB - the freed 14 KB of
+  heap is what ended the connect-time OOM panics (vQueueDelete assert /
+  lock_init_generic abort).
+  */
+  int stack_size_task_rtk_get_corrrection_data = 1024 * 9;       // min free was 280 of 7168 (!) — grown, was nearly overflowing
+  int stack_size_task_rtk_get_rover_position = 1024 * 4;         // min free was 5824 of 7168
+  int stack_size_task_bno_orientation_via_ble = 1024 * 4;        // min free was 9160 of 11264
+  int stack_size_task_send_rtk_position_via_ble = 1024 * 4;      // min free was 8224 of 10240
 
   xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, &hTaskCorrData, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, &hTaskPosition, RUNNING_CORE_0);
