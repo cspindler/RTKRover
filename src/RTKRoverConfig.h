@@ -23,7 +23,12 @@
 =================================================================================
 */
 
-#define TELEMETRY_RING_SIZE           8192  // bytes; drop-oldest on overflow
+#define TELEMETRY_RING_SIZE           4096  // bytes; drop-oldest on overflow.
+                                            // 4 KB not 8: steady-state free heap
+                                            // was ~2.3 KB with 8 KB (measured
+                                            // 2026-07-29, OOM panic on BLE
+                                            // connect). ~40 s backlog at 1 Hz
+                                            // gnss_fix still fits.
 #define TELEMETRY_MAX_FRAME           192   // largest single frame incl. 3 B header
                                             // (error event worst case; fits MTU 185)
 

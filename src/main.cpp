@@ -104,18 +104,36 @@ class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
   }
 };
 
+// Task handles, for the debug-build stack watermark report in loop().
+static TaskHandle_t hTaskCorrData = NULL;
+static TaskHandle_t hTaskPosition = NULL;
+static TaskHandle_t hTaskBnoBle = NULL;
+static TaskHandle_t hTaskRtkBle = NULL;
+
+// Heap diagnostics (debug builds): connect time is the critical moment —
+// Bluedroid allocates the GATT connection control block on the BT task, and
+// an allocation failure there escalates to a vQueueDelete(NULL) panic
+// (fixed_queue_new error path, observed 2026-07-29). Track the margin.
+static void logFreeHeap(const char *where)
+{
+  DBG.printf("heap @ %s: free %u, min ever %u\n",
+             where, esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+}
+
 class MyServerCallbacks: public BLEServerCallbacks
 {
     void onConnect(BLEServer* pServer)
     {
         bleConnected = true;
         BLEDevice::stopAdvertising();
+        logFreeHeap("ble_connect");
     };
 
     void onDisconnect(BLEServer* pServer)
     {
         bleConnected = false;
         BLEDevice::startAdvertising();
+        logFreeHeap("ble_disconnect");
     }
 };
 
@@ -317,20 +335,37 @@ void setup()
   int stack_size_task_bno_orientation_via_ble = 1024 * 11;  // Last measurement:
   int stack_size_task_send_rtk_position_via_ble = 1024 * 10;     // Last measurement: 9480
 
-  xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, NULL, RUNNING_CORE_0);
-  xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, NULL, RUNNING_CORE_0);
-  xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
-  xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, NULL, RUNNING_CORE_1);
+  xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, &hTaskCorrData, RUNNING_CORE_0);
+  xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, &hTaskPosition, RUNNING_CORE_0);
+  xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, &hTaskBnoBle, RUNNING_CORE_1);
+  xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, &hTaskRtkBle, RUNNING_CORE_1);
 
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
   DBG.println(thisBoard);
+  logFreeHeap("setup_done");
 } /*** end setup ***/
 
 void loop()
 {
   #if DEBUGGING
   aunit::TestRunner::run();
+
+  // Periodic memory report: free heap + per-task stack watermarks (bytes of
+  // stack never used — the reclaimable margin when right-sizing the
+  // stack_size_task_* values in setup()).
+  static uint32_t lastMemReport = 0;
+  if (millis() - lastMemReport >= 10000)
+  {
+    lastMemReport = millis();
+    logFreeHeap("loop");
+    DBG.printf("stack min free: corr %u, pos %u, bno %u, rtkble %u, loop %u\n",
+               hTaskCorrData ? uxTaskGetStackHighWaterMark(hTaskCorrData) : 0,
+               hTaskPosition ? uxTaskGetStackHighWaterMark(hTaskPosition) : 0,
+               hTaskBnoBle ? uxTaskGetStackHighWaterMark(hTaskBnoBle) : 0,
+               hTaskRtkBle ? uxTaskGetStackHighWaterMark(hTaskRtkBle) : 0,
+               uxTaskGetStackHighWaterMark(NULL));
+  }
   #endif
 }
 
