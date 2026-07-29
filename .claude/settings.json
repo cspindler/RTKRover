@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run)",
+      "Bash(pio run *)",
+      "Bash(pio device list)",
+      "Bash(pio device list *)",
+      "Bash(pio device monitor *)",
+      "Bash(pio check *)",
+      "Bash(pio test *)",
+      "Bash(pio pkg *)",
+      "Bash(pio system info)",
+      "Bash(tools/flash-and-watch.sh *)",
+      "Bash(./tools/flash-and-watch.sh *)"
+    ]
+  }
+}
