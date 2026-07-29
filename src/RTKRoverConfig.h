@@ -12,12 +12,16 @@
 =================================================================================
 */
 
-// Set to true for debug mode, false for production mode
-#define DEBUGGING true
+// Debug mode. Defaults to off (production); build the `featheresp32_debug` env
+// or add -DDEBUGGING=1 to build_flags to turn serial logging on without editing
+// this file.
+#ifndef DEBUGGING
+#define DEBUGGING 0
+#endif
 #define DBG \
   if (DEBUGGING) Serial
 
-#ifdef DEBUGGING
+#if DEBUGGING
 #define TESTING
 #endif
 
