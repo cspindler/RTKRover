@@ -141,8 +141,9 @@ static void telemetryDrainTask(void *pvParameters)
       lastHeartbeat = millis();
       telemetryEmitHeartbeat(esp_get_free_heap_size(), WiFi.RSSI(),
                              telemetryNtripConnected());
-      DBG.printf("telemetry: heartbeat%s, dropped %u\n",
-                 dump ? " (status dump)" : "", telemetryDroppedFrames());
+      DBG.printf("telemetry: heartbeat%s, seq %u, dropped %u\n",
+                 dump ? " (status dump)" : "", telemetrySeqNow(),
+                 telemetryDroppedFrames());
     }
 
     if (!linkConnected.load(std::memory_order_relaxed)) continue;

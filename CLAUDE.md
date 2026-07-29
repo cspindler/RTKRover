@@ -136,8 +136,11 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 
 ## Current work queue
 
-1. Telemetry GATT service (TX notify + CTRL write characteristics)
-2. Ring buffer + telemetry task; CBOR encoding with short integer keys
-3. Event emitters: gnss_fix (1 Hz), heartbeat (15 s), ntrip_status, imu_status, error
-4. CTRL commands: set verbosity, status dump
-5. OTA partition table + version embedding
+1. ~~Telemetry GATT service (TX notify + CTRL write characteristics)~~ done 2026-07-29
+2. ~~Ring buffer + telemetry task; CBOR encoding with short integer keys~~ done 2026-07-29
+3. ~~Event emitters: gnss_fix (1 Hz), heartbeat (15 s), ntrip_status, imu_status, error~~ done 2026-07-29
+4. ~~CTRL commands: set verbosity, status dump~~ done 2026-07-29 (device side; app sends nothing yet)
+5. OTA partition table (version embedding is done; the partition decision —
+   `min_spiffs.csv` vs custom table — is still open, see the constraint above)
+6. Live end-to-end check with the updated RWA Player build (device events in
+   the Diagnostics tab), then watch real events land in Grafana (§9 step 4)

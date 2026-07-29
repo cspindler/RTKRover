@@ -52,6 +52,9 @@ size_t telemetryPopFrame(uint8_t *out, size_t outCap);
 /// reported in every heartbeat.
 uint32_t telemetryDroppedFrames();
 
+/// Last assigned seq = total events emitted since boot (diagnostics).
+uint32_t telemetrySeqNow();
+
 /// Verbosity = minimum error severity emitted (par. 5.4 CTRL 0x01).
 /// Default 1: everything. telemetryEmitError() drops below-threshold events.
 void telemetrySetVerbosity(uint8_t minSeverity);
@@ -61,5 +64,11 @@ uint8_t telemetryVerbosity();
 /// heartbeat emitter (and by ntrip_status events, work-queue step 5).
 void telemetrySetNtripConnected(bool connected);
 bool telemetryNtripConnected();
+
+/// RTCM bookkeeping (par. 4.3): the NTRIP task calls this after each
+/// pushRawData; gnss_fix reads the age, ntrip_status the byte total.
+void telemetryNoteRtcmPushed(uint32_t numBytes);
+uint32_t telemetryCorrAgeMs();       // 0xFFFFFFFF = never received
+uint32_t telemetryRtcmBytesTotal();
 
 #endif /*** TELEMETRY_H ***/

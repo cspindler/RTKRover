@@ -422,17 +422,30 @@ void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 
 bool setupGNSS()
 {
+    bool busFailEmitted = false;   // one error event per setup, not per retry
     while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN))
     {
       DBG.println(F("I2C for RTK not running, check cable!"));
+      if (!busFailEmitted)
+      {
+        busFailEmitted = true;
+        telemetryEmitError(2, "i2c_bus_rtk_failed", "Wire1.begin() failing, check cable");
+      }
       delay(500);
     }
 
     Wire1.setClock(I2C_FREQUENCY_400K);
 
+    bool gnssFailEmitted = false;
     while (myGNSS.begin(Wire1, RTK_I2C_ADDR) == false)
     {
       DBG.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing loop."));
+      if (!gnssFailEmitted)
+      {
+        gnssFailEmitted = true;
+        // Severity 3: without the ZED-F9P there is no positioning at all.
+        telemetryEmitError(3, "i2c_gnss_not_detected", "ZED-F9P begin() failing, check wiring");
+      }
       blinkOneTime(500, false);
     }
 
@@ -479,6 +492,29 @@ void updatePosition()
     old_accuracy = accuracy;
   }
 
+  // 1 Hz gnss_fix telemetry sample (PROJECT-PLAN.md par. 4.3, the dead-zone
+  // dataset). Runs under the same mutex/I2C context as the position poll
+  // above; the first PVT getter fetches one fresh NAV-PVT, the rest read the
+  // cached packet, so this adds one UBX poll per second. Emitting is a
+  // non-blocking memcpy into the telemetry ring.
+  static uint32_t lastFixEmit_ms = 0;
+  if (millis() - lastFixEmit_ms >= 1000)
+  {
+    lastFixEmit_ms = millis();
+    TelemetryGnssFix fix;
+    fix.lat = lat * 1e-7 + latHp * 1e-9;   // UBX 1e-7 deg + 1e-9 high-res part
+    fix.lon = lon * 1e-7 + lonHp * 1e-9;
+    fix.heightM = myGNSS.getElipsoid() / 1000.0f
+                + myGNSS.getElipsoidHp() / 10000.0f;  // mm + 0.1 mm parts
+    fix.fixType = myGNSS.getFixType();
+    fix.carrSoln = myGNSS.getCarrierSolutionType();
+    fix.hAccMm = myGNSS.getHorizontalAccEst();
+    fix.vAccMm = myGNSS.getVerticalAccEst();
+    fix.numSv = myGNSS.getSIV();
+    fix.pdop = myGNSS.getPDOP() * 0.01f;
+    fix.corrAgeMs = telemetryCorrAgeMs();
+    telemetryEmitGnssFix(fix);
+  }
 }
 
 /*
@@ -555,11 +591,27 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   WiFiClient ntripClient;
   long rtcmCount = 0;
 
+  // ntrip_status bookkeeping (PROJECT-PLAN.md par. 4.3): events on state
+  // transitions only, never per retry iteration - outages must not flood
+  // the ring. successfulConnects - 1 = "reconnects" in the event.
+  uint32_t successfulConnects = 0;
+  bool wasConnected = false;
+  bool outageErrorEmitted = false;   // one error event per outage, not per retry
+  bool reconnectingEmitted = false;  // one reconnecting event per outage
+  bool wifiLossEmitted = false;
+
   while (true) // Task loop begins
   {
-    // Mirror the link state for the telemetry heartbeat (one loop period of
-    // lag is fine; full ntrip_status transition events are work-queue step 5)
-    telemetrySetNtripConnected(ntripClient.connected());
+    // Mirror the link state for the telemetry heartbeat
+    bool nowConnected = ntripClient.connected();
+    telemetrySetNtripConnected(nowConnected);
+    if (wasConnected && !nowConnected)
+    {
+      telemetryEmitNtripStatus(TELEM_NTRIP_DISCONNECTED,
+                               successfulConnects > 0 ? successfulConnects - 1 : 0,
+                               telemetryRtcmBytesTotal());
+    }
+    wasConnected = nowConnected;
 
     /*
     This ist most of the content beginServing() func from the
@@ -577,9 +629,25 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(F("task_rtk_get_corr_data loop: Not connected to WiFi station"));
         DBG.printf("WiFi state: %d", WiFi.status());
         DBG.println();
+        if (!wifiLossEmitted)
+        {
+          wifiLossEmitted = true;
+          telemetryEmitError(1, "wifi_disconnected", "hotspot lost, reconnecting");
+        }
         setupStationMode(kWifiSsid, kWifiPw);
         blinkOneTime(1000, false);
         blinkOneTime(100, false);
+      }
+      wifiLossEmitted = false;
+
+      if (successfulConnects > 0 && !reconnectingEmitted)
+      {
+        // Once per outage, and only after a previous connection: the
+        // initial connect is not a "reconnecting" transition.
+        reconnectingEmitted = true;
+        telemetryEmitNtripStatus(TELEM_NTRIP_RECONNECTING,
+                                 successfulConnects - 1,
+                                 telemetryRtcmBytesTotal());
       }
 
       DBG.print(F("Opening socket to "));
@@ -589,6 +657,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (ntripClient.connect( casterHost.c_str(), (uint16_t)casterPort.toInt() ) == false)
       {
         DBG.println(F("Connection to caster failed, retry in 5s"));
+        if (!outageErrorEmitted)
+        {
+          outageErrorEmitted = true;
+          telemetryEmitError(1, "ntrip_connect_failed", "TCP connect to caster failed");
+        }
         vTaskDelay(5000/portTICK_PERIOD_MS);
         continue; // skip to next iteration and retry
       }
@@ -716,6 +789,14 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           DBG.print(casterHost.c_str());
           DBG.print(F(": "));
           DBG.println(response);
+          if (!outageErrorEmitted)
+          {
+            outageErrorEmitted = true;
+            // Caster spoke but refused (401, wrong mount point, ban):
+            // config-class problem, so severity 2 - a Grafana alert, not
+            // noise. The caster response goes in msg (no secrets in it).
+            telemetryEmitError(2, "ntrip_bad_response", response);
+          }
           vTaskDelay(5000/portTICK_PERIOD_MS);
           continue; // skip to next iteration and retry
         }
@@ -724,6 +805,13 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           DBG.print(F("Connected to "));
           DBG.println(casterHost.c_str());
           lastReceivedRTCM_ms = millis(); // Reset timeout
+
+          successfulConnects++;
+          outageErrorEmitted = false;
+          reconnectingEmitted = false;
+          telemetryEmitNtripStatus(TELEM_NTRIP_CONNECTED,
+                                   successfulConnects - 1,
+                                   telemetryRtcmBytesTotal());
 
           myGNSS.checkUblox();
           myGNSS.checkCallbacks();
@@ -751,6 +839,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         {
           myGNSS.pushRawData(rtcmData, rtcmCount, false);
           beginPositioning = true;
+          telemetryNoteRtcmPushed(rtcmCount);  // feeds corr_age_ms + bytes_rx
           xSemaphoreGive(mutexSem);
           DBG.print(F("RTCM pushed to ZED: "));
           DBG.println(rtcmCount);
@@ -800,7 +889,12 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     {
       DBG.println(F("RTCM timeout. Disconnecting..."));
       if (ntripClient.connected() == true)
+      {
+        // Socket up but no corrections for 10 s - this is the signature of a
+        // correction-delivery problem (vs. GNSS degradation, PROJECT-PLAN par. 2)
+        telemetryEmitError(1, "ntrip_rtcm_timeout", "no RTCM for 10 s, dropping caster connection");
         ntripClient.stop();
+      }
     }
 
     // Measure stack size (last was 19320)
@@ -884,10 +978,16 @@ void setupBLE(void)
 void setupBNO080()
 {
   Wire.begin();
+  bool beginFailEmitted = false;  // one error event per setup, not per retry
   while (!bno080.begin())
   {
     // Wait
     DBG.println(F("BNO080 not ready, waiting for I2C..."));
+    if (!beginFailEmitted)
+    {
+      beginFailEmitted = true;
+      telemetryEmitError(2, "i2c_bno080_not_detected", "BNO080 begin() failing, check wiring");
+    }
     delay(500);
   }
 
@@ -1009,6 +1109,13 @@ void task_bno_orientation_via_ble(void *pvParameters)
 
   setupBNO080();
 
+  // imu_status telemetry (PROJECT-PLAN.md par. 4.3): every 60 s report the
+  // measured notify rate, calibration accuracy and reset count. hasReset()
+  // and getQuatAccuracy() read cached state - no extra I2C on the hot path.
+  uint32_t imuSampleCount = 0;
+  uint32_t imuResets = 0;
+  uint32_t lastImuStatus_ms = millis();
+
   float quatI, quatJ, quatK, quatReal, yawDegreeF, pitchDegreeF, linAccelZF;// rollDegreeF;
   int pitchDegree, yawDegree;// rollDegree;
   String dataStr((char *)0);
@@ -1030,9 +1137,19 @@ void task_bno_orientation_via_ble(void *pvParameters)
     }
     else
     {
+      if (bno080.hasReset()) imuResets++;  // reading unflags it
+      if (millis() - lastImuStatus_ms >= 60000)
+      {
+        float reportRateHz = imuSampleCount * 1000.0f / (millis() - lastImuStatus_ms);
+        telemetryEmitImuStatus(bno080.getQuatAccuracy(), reportRateHz, imuResets);
+        lastImuStatus_ms = millis();
+        imuSampleCount = 0;
+      }
+
       // TODO: Separate reading values from sending values
       if (bno080.dataAvailable())
       {
+        imuSampleCount++;
         quatI = bno080.getQuatI();
         quatJ = bno080.getQuatJ();
         quatK = bno080.getQuatK();

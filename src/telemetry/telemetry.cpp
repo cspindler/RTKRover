@@ -153,6 +153,28 @@ bool telemetryNtripConnected()
   return ntripConnected.load(std::memory_order_relaxed);
 }
 
+static std::atomic<uint32_t> lastRtcmMs{0};
+static std::atomic<bool> rtcmEverReceived{false};
+static std::atomic<uint32_t> rtcmBytesTotal{0};
+
+void telemetryNoteRtcmPushed(uint32_t numBytes)
+{
+  lastRtcmMs.store(millis(), std::memory_order_relaxed);
+  rtcmEverReceived.store(true, std::memory_order_relaxed);
+  rtcmBytesTotal.fetch_add(numBytes, std::memory_order_relaxed);
+}
+
+uint32_t telemetryCorrAgeMs()
+{
+  if (!rtcmEverReceived.load(std::memory_order_relaxed)) return 0xFFFFFFFF;
+  return millis() - lastRtcmMs.load(std::memory_order_relaxed);
+}
+
+uint32_t telemetryRtcmBytesTotal()
+{
+  return rtcmBytesTotal.load(std::memory_order_relaxed);
+}
+
 bool telemetryEmitError(uint8_t severity, const char *code, const char *msg)
 {
   if (severity < telemetryVerbosity()) return false;  // CTRL 0x01 gate
@@ -175,4 +197,9 @@ uint32_t telemetryDroppedFrames()
 {
   return ringBuffer.droppedCount() +
          encodeDrops.load(std::memory_order_relaxed);
+}
+
+uint32_t telemetrySeqNow()
+{
+  return seqCounter.load(std::memory_order_relaxed);
 }
