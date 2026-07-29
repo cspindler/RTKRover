@@ -1,0 +1,15 @@
+# Known RTK rover units, by CP2104 USB-serial serial number.
+#
+# The serial number is baked into the macOS device path
+# (/dev/cu.usbserial-<SERIAL>), so listing units here lets the tooling discover
+# which board is attached instead of trusting a hardcoded port.
+#
+# Find the serial of a newly added unit with:
+#     pio device list
+# and look for "SER=..." on the CP2104 entry.
+#
+# Format:  <SERIAL>  <label>
+# Lines starting with # and blank lines are ignored.
+
+01562BEE  rover-01
+01562AF9  rover-02   # was configured in platformio.ini before 2026-07-29; not yet seen attached
