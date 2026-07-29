@@ -52,4 +52,14 @@ size_t telemetryPopFrame(uint8_t *out, size_t outCap);
 /// reported in every heartbeat.
 uint32_t telemetryDroppedFrames();
 
+/// Verbosity = minimum error severity emitted (par. 5.4 CTRL 0x01).
+/// Default 1: everything. telemetryEmitError() drops below-threshold events.
+void telemetrySetVerbosity(uint8_t minSeverity);
+uint8_t telemetryVerbosity();
+
+/// NTRIP link state, mirrored by the NTRIP task each loop; consumed by the
+/// heartbeat emitter (and by ntrip_status events, work-queue step 5).
+void telemetrySetNtripConnected(bool connected);
+bool telemetryNtripConnected();
+
 #endif /*** TELEMETRY_H ***/

@@ -84,4 +84,10 @@ enum TelemetryErrorKey : uint8_t {
 #define TELEMETRY_ERR_CODE_MAX  32
 #define TELEMETRY_ERR_MSG_MAX   120  // BLE-leg cap (PROJECT-PLAN.md par. 5.2)
 
+// CTRL characteristic commands (par. 5.4): [u8 cmd][args...]
+enum TelemetryCtrlCommand : uint8_t {
+  TELEM_CTRL_SET_VERBOSITY = 0x01,  // arg: u8 = min error severity emitted
+  TELEM_CTRL_STATUS_DUMP   = 0x02,  // no args
+};
+
 #endif /*** TELEMETRY_KEYS_H ***/

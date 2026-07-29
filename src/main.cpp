@@ -36,6 +36,8 @@
 #include <RTKRoverConfig.h>
 #include <CasterSecrets.h>
 #include <handle_wifi.h>
+#include <telemetry/telemetry.h>
+#include <telemetry/telemetry_ble.h>
 #include <TestsRTKRover.h>
 
 /*
@@ -126,6 +128,7 @@ class MyServerCallbacks: public BLEServerCallbacks
     {
         bleConnected = true;
         BLEDevice::stopAdvertising();
+        telemetryBleOnConnect();
         logFreeHeap("ble_connect");
     };
 
@@ -133,7 +136,16 @@ class MyServerCallbacks: public BLEServerCallbacks
     {
         bleConnected = false;
         BLEDevice::startAdvertising();
+        telemetryBleOnDisconnect();
         logFreeHeap("ble_disconnect");
+    }
+
+    void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param)
+    {
+        // The telemetry drain must know the real MTU: notifying more than
+        // mtu-3 bytes is silently truncated and would desync its stream.
+        telemetryBleOnMtuChanged(param->mtu.mtu);
+        DBG.printf("BLE MTU changed: %u\n", param->mtu.mtu);
     }
 };
 
@@ -349,6 +361,9 @@ void setup()
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, &hTaskBnoBle, RUNNING_CORE_1);
   xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, &hTaskRtkBle, RUNNING_CORE_1);
 
+  // Telemetry drain: lowest priority in the system (PROJECT-PLAN.md par. 5)
+  telemetryBleStartTask();
+
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
   DBG.println(thisBoard);
@@ -368,11 +383,12 @@ void loop()
   {
     lastMemReport = millis();
     logFreeHeap("loop");
-    DBG.printf("stack min free: corr %u, pos %u, bno %u, rtkble %u, loop %u\n",
+    DBG.printf("stack min free: corr %u, pos %u, bno %u, rtkble %u, telem %u, loop %u\n",
                hTaskCorrData ? uxTaskGetStackHighWaterMark(hTaskCorrData) : 0,
                hTaskPosition ? uxTaskGetStackHighWaterMark(hTaskPosition) : 0,
                hTaskBnoBle ? uxTaskGetStackHighWaterMark(hTaskBnoBle) : 0,
                hTaskRtkBle ? uxTaskGetStackHighWaterMark(hTaskRtkBle) : 0,
+               telemetryBleTaskHandle() ? uxTaskGetStackHighWaterMark(telemetryBleTaskHandle()) : 0,
                uxTaskGetStackHighWaterMark(NULL));
   }
   #endif
@@ -541,6 +557,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
   while (true) // Task loop begins
   {
+    // Mirror the link state for the telemetry heartbeat (one loop period of
+    // lag is fine; full ntrip_status transition events are work-queue step 5)
+    telemetrySetNtripConnected(ntripClient.connected());
+
     /*
     This ist most of the content beginServing() func from the
     Sparkfun u-blox GNSS Arduino Library/ZED-F9P/Example15-NTRIPClient
@@ -825,6 +845,11 @@ void setupBLE(void)
   pRTKAccuracyCharacteristic->addDescriptor(new BLE2902());
 
   pService->start();
+
+  // Telemetry GATT service (PROJECT-PLAN.md par. 5.1); not advertised — the
+  // 31 B adv payload has no room for a second 128-bit UUID.
+  telemetryBleSetup(pServer);
+
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);

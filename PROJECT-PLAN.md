@@ -250,6 +250,16 @@ Type-specific keys start at 10 (`type` disambiguates, so numbers repeat across t
 Additive evolution: new fields get new keys (never reuse a retired number within a
 type); new event types get the next free `type` value. Both sides ignore unknown keys.
 
+### 5.4 CTRL commands (app → device)
+
+Write `[u8 cmd][args…]` to the CTRL characteristic. Unknown commands are ignored
+(forward compatibility; the command space is versioned by `proto_version`).
+
+| cmd | args | effect |
+| --- | --- | --- |
+| `0x01` set_verbosity | u8 level | minimum `error.severity` the device emits (default 1 = everything) |
+| `0x02` status_dump | — | device immediately emits a heartbeat (plus `ntrip_status` / `imu_status` once those emitters land) |
+
 ---
 
 ## 6. App responsibilities (rwa-player)

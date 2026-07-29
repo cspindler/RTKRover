@@ -130,8 +130,32 @@ bool telemetryEmitImuStatus(uint8_t calibStatus, float reportRateHz,
   return b.commit();
 }
 
+static std::atomic<uint8_t> verbosity{1};
+static std::atomic<bool> ntripConnected{false};
+
+void telemetrySetVerbosity(uint8_t minSeverity)
+{
+  verbosity.store(minSeverity, std::memory_order_relaxed);
+}
+
+uint8_t telemetryVerbosity()
+{
+  return verbosity.load(std::memory_order_relaxed);
+}
+
+void telemetrySetNtripConnected(bool connected)
+{
+  ntripConnected.store(connected, std::memory_order_relaxed);
+}
+
+bool telemetryNtripConnected()
+{
+  return ntripConnected.load(std::memory_order_relaxed);
+}
+
 bool telemetryEmitError(uint8_t severity, const char *code, const char *msg)
 {
+  if (severity < telemetryVerbosity()) return false;  // CTRL 0x01 gate
   FrameBuilder b(TELEM_TYPE_ERROR, 3);
   b.w.key(TELEM_ERR_SEVERITY);
   b.w.uintVal(severity);

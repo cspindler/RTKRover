@@ -29,6 +29,15 @@
                                             // 2026-07-29, OOM panic on BLE
                                             // connect). ~40 s backlog at 1 Hz
                                             // gnss_fix still fits.
+#define TELEMETRY_TICK_MS             100   // drain task period
+#define TELEMETRY_MAX_NOTIFY_PER_TICK 2     // pacing: caps telemetry at ~2 x
+                                            // (MTU-3) bytes / tick so a backlog
+                                            // drain can never crowd the
+                                            // headtracker notifications
+#define TELEMETRY_HEARTBEAT_MS        15000 // PROJECT-PLAN.md par. 4.3
+#define TELEMETRY_NOTIFY_BUF          247   // upper bound for one notification
+                                            // payload; effective cap is the
+                                            // negotiated MTU-3 (iOS: ~182)
 #define TELEMETRY_MAX_FRAME           192   // largest single frame incl. 3 B header
                                             // (error event worst case; fits MTU 185)
 
@@ -80,6 +89,10 @@
 #define HEADTRACKER_CHARACTERISTIC_UUID         "713D0002-503E-4C75-BA94-3148F18D941E"
 #define REALTIME_KINEMATICS_CHARACTERISTIC_UUID "713D0004-503E-4C75-BA94-3148F18D941E"
 #define RTK_ACCURACY_CHARACTERISTIC_UUID        "713D0006-503E-4C75-BA94-3148F18D941E"
+// Telemetry GATT service (PROJECT-PLAN.md par. 5.1) — cross-repo contract
+#define TELEMETRY_SERVICE_UUID                  "713D0100-503E-4C75-BA94-3148F18D941E"
+#define TELEMETRY_TX_CHARACTERISTIC_UUID        "713D0101-503E-4C75-BA94-3148F18D941E"
+#define TELEMETRY_CTRL_CHARACTERISTIC_UUID      "713D0102-503E-4C75-BA94-3148F18D941E"
 #define LIN_ACCEL_Z_DECIMAL_DIGITS   2
 #define DATA_STR_DELIMITER           " "
 
@@ -121,6 +134,7 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define TASK_RTK_GET_POSITION_PRIORITY                  2
 #define TASK_BNO080_VIA_BLE_PRIORITY                    2     // Headtracking: highest priority for immersive audio
 #define TASK_RTK_POSITION_VIA_BLE_PRIORITY              2     // Real Time Kinematics data to iOS app, (should not break head tracking)
+#define TASK_TELEMETRY_PRIORITY                         1     // Lowest in the system: telemetry may starve, never compete (PROJECT-PLAN.md par. 5)
 #define TASK_RTK_BLE_INTERVAL_MS                      100    // Send position to iPhone
 #define TASK_RTK_GET_POSITION_INTERVAL_MS             100
 #define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       12
