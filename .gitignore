@@ -6,3 +6,4 @@
 .elf
 # lib/*
 src/CasterSecrets.h
+src/telemetry/fw_version_autogen.h
