@@ -11,5 +11,8 @@
 # Format:  <SERIAL>  <label>
 # Lines starting with # and blank lines are ignored.
 
-01562BEE  rover-01
-01562AF9  rover-02   # was configured in platformio.ini before 2026-07-29; not yet seen attached
+01562BEE rwa-hs-1
+01562AF9 rwa-hs-2
+01643EB8 rwa-hs-3
+02860F06 rwa-hs-4
+01562CE8 rwa-hs-5
