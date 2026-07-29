@@ -58,6 +58,15 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 - `platformio.ini`: shared `[env]` section; hardcoded `upload_port`/
   `monitor_port`/`test_port` removed (the port embeds one unit's serial
   number and goes stale on board swaps) — the tools discover the port.
+- Stream nav messages instead of polling to unblock the position task
+  - Polled GNSS getters block on an I2C poll round-trip per message; the 1 Hz
+    gnss_fix telemetry burst measured up to ~2 s, stalling the position task
+    and everything behind mutexSem. Enable auto delivery for NAV-PVT,
+    NAV-HPPOSLLH and NAV-HPPOSECEF (getPositionAccuracy polled the latter
+    every 100 ms too), so the getters become non-blocking cached reads.
+  - Verified on hardware: getters now 0-1 ms every emit (was bursts to ~2 s),
+    gnss_fix steady at 1 Hz, position frames and GGA push unaffected, heap
+    unchanged (auto mode reuses the packet structs polling already allocated).
 
 ### Fixed
 

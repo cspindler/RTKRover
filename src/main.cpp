@@ -459,6 +459,17 @@ bool setupGNSS()
 
     // Set output in Hz.
     response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ);
+
+    // Stream the nav messages instead of polling them. Polled getters block
+    // on an I2C poll round-trip per message (measured bursts up to ~2 s in
+    // updatePosition, stalling the position task and everything behind
+    // mutexSem). With auto delivery the module pushes NAV-PVT (fixType,
+    // carrSoln, h/vAcc, SIV, pDOP), NAV-HPPOSLLH (high-res lat/lon/height)
+    // and NAV-HPPOSECEF (getPositionAccuracy) at the navigation rate, and
+    // the getters become non-blocking reads of the cached packet.
+    response &= myGNSS.setAutoPVT(true);
+    response &= myGNSS.setAutoHPPOSLLH(true);
+    response &= myGNSS.setAutoNAVHPPOSECEF(true);
     byte rate = myGNSS.getNavigationFrequency(); // Get the update rate of this module
     DBG.print(F("Current update rate: "));
     DBG.println(rate);
@@ -518,10 +529,10 @@ void updatePosition()
   }
 
   // 1 Hz gnss_fix telemetry sample (PROJECT-PLAN.md par. 4.3, the dead-zone
-  // dataset). Runs under the same mutex/I2C context as the position poll
-  // above; the first PVT getter fetches one fresh NAV-PVT, the rest read the
-  // cached packet, so this adds one UBX poll per second. Emitting is a
-  // non-blocking memcpy into the telemetry ring.
+  // dataset). NAV-PVT/HPPOSLLH/HPPOSECEF arrive streamed (setAuto* in
+  // setupGNSS), so every getter below is a non-blocking read of the cached
+  // packet — no I2C poll round-trips. Emitting is a non-blocking memcpy
+  // into the telemetry ring.
   static uint32_t lastFixEmit_ms = 0;
   if (millis() - lastFixEmit_ms >= 1000)
   {
@@ -530,18 +541,14 @@ void updatePosition()
     TelemetryGnssFix fix;
     fix.lat = lat * 1e-7 + latHp * 1e-9;   // UBX 1e-7 deg + 1e-9 high-res part
     fix.lon = lon * 1e-7 + lonHp * 1e-9;
-    // maxWait 250 ms per getter (default is 1100): telemetry tolerates a
-    // stale/zero field, but a slow poll must never stall the position task
-    // for seconds. Worst case is now bounded at ~2 s instead of ~9.
-    const uint16_t kFixWait_ms = 250;
-    fix.heightM = myGNSS.getElipsoid(kFixWait_ms) / 1000.0f
-                + myGNSS.getElipsoidHp(kFixWait_ms) / 10000.0f;  // mm + 0.1 mm parts
-    fix.fixType = myGNSS.getFixType(kFixWait_ms);
-    fix.carrSoln = myGNSS.getCarrierSolutionType(kFixWait_ms);
-    fix.hAccMm = myGNSS.getHorizontalAccEst(kFixWait_ms);
-    fix.vAccMm = myGNSS.getVerticalAccEst(kFixWait_ms);
-    fix.numSv = myGNSS.getSIV(kFixWait_ms);
-    fix.pdop = myGNSS.getPDOP(kFixWait_ms) * 0.01f;
+    fix.heightM = myGNSS.getElipsoid() / 1000.0f
+                + myGNSS.getElipsoidHp() / 10000.0f;  // mm + 0.1 mm parts
+    fix.fixType = myGNSS.getFixType();
+    fix.carrSoln = myGNSS.getCarrierSolutionType();
+    fix.hAccMm = myGNSS.getHorizontalAccEst();
+    fix.vAccMm = myGNSS.getVerticalAccEst();
+    fix.numSv = myGNSS.getSIV();
+    fix.pdop = myGNSS.getPDOP() * 0.01f;
     fix.corrAgeMs = telemetryCorrAgeMs();
     telemetryEmitGnssFix(fix);
     DBG.printf("gnss_fix: acc %d mm, getters took %u ms\n",
