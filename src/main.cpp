@@ -492,13 +492,28 @@ void updatePosition()
   // deliberately NOT gated: the dead-zone dataset needs the bad fixes too.
   if (accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM)
   {
-    xQueueSend(xQueueCoord, &coord, portMAX_DELAY);
+    // Never block here: this runs holding mutexSem, and with no BLE central
+    // draining the queue a portMAX_DELAY send wedged the whole GNSS
+    // pipeline (position task blocks holding the mutex -> NTRIP task can't
+    // pushRawData -> corrections stop; measured 43 s stalls, 2026-07-29).
+    // Latest position wins: on a full queue, drop the oldest and retry.
+    if (xQueueSend(xQueueCoord, &coord, 0) != pdPASS)
+    {
+      coord_t discard;
+      xQueueReceive(xQueueCoord, &discard, 0);
+      xQueueSend(xQueueCoord, &coord, 0);
+    }
   }
 
   // Send accuracy if changed only
   if (accuracy != old_accuracy)
   {
-    xQueueSend( xQueueAccuracy, &accuracy, portMAX_DELAY );
+    if (xQueueSend(xQueueAccuracy, &accuracy, 0) != pdPASS)
+    {
+      int32_t discard;
+      xQueueReceive(xQueueAccuracy, &discard, 0);
+      xQueueSend(xQueueAccuracy, &accuracy, 0);
+    }
     old_accuracy = accuracy;
   }
 
@@ -511,19 +526,26 @@ void updatePosition()
   if (millis() - lastFixEmit_ms >= 1000)
   {
     lastFixEmit_ms = millis();
+    uint32_t emitStart_ms = millis();  // measure the getter cost (debug diag)
     TelemetryGnssFix fix;
     fix.lat = lat * 1e-7 + latHp * 1e-9;   // UBX 1e-7 deg + 1e-9 high-res part
     fix.lon = lon * 1e-7 + lonHp * 1e-9;
-    fix.heightM = myGNSS.getElipsoid() / 1000.0f
-                + myGNSS.getElipsoidHp() / 10000.0f;  // mm + 0.1 mm parts
-    fix.fixType = myGNSS.getFixType();
-    fix.carrSoln = myGNSS.getCarrierSolutionType();
-    fix.hAccMm = myGNSS.getHorizontalAccEst();
-    fix.vAccMm = myGNSS.getVerticalAccEst();
-    fix.numSv = myGNSS.getSIV();
-    fix.pdop = myGNSS.getPDOP() * 0.01f;
+    // maxWait 250 ms per getter (default is 1100): telemetry tolerates a
+    // stale/zero field, but a slow poll must never stall the position task
+    // for seconds. Worst case is now bounded at ~2 s instead of ~9.
+    const uint16_t kFixWait_ms = 250;
+    fix.heightM = myGNSS.getElipsoid(kFixWait_ms) / 1000.0f
+                + myGNSS.getElipsoidHp(kFixWait_ms) / 10000.0f;  // mm + 0.1 mm parts
+    fix.fixType = myGNSS.getFixType(kFixWait_ms);
+    fix.carrSoln = myGNSS.getCarrierSolutionType(kFixWait_ms);
+    fix.hAccMm = myGNSS.getHorizontalAccEst(kFixWait_ms);
+    fix.vAccMm = myGNSS.getVerticalAccEst(kFixWait_ms);
+    fix.numSv = myGNSS.getSIV(kFixWait_ms);
+    fix.pdop = myGNSS.getPDOP(kFixWait_ms) * 0.01f;
     fix.corrAgeMs = telemetryCorrAgeMs();
     telemetryEmitGnssFix(fix);
+    DBG.printf("gnss_fix: acc %d mm, getters took %u ms\n",
+               accuracy, millis() - emitStart_ms);
   }
 }
 
@@ -823,7 +845,19 @@ void task_rtk_get_corrrection_data(void *pvParameters)
                                    successfulConnects - 1,
                                    telemetryRtcmBytesTotal());
 
-          myGNSS.checkUblox();
+          // checkUblox under mutexSem like every other myGNSS I2C access:
+          // this runs on core 0 while the position task polls the same
+          // object/bus from its own loop - unsynchronized access desyncs
+          // the UBX parser and stalled the position getters for seconds
+          // (measured 8.8 s, 2026-07-29). checkCallbacks must stay OUTSIDE
+          // the mutex: it touches no I2C, and it invokes callbackGPGGA,
+          // which takes mutexSem itself (non-recursive - taking it here
+          // would self-deadlock this task and starve positioning).
+          if (xSemaphoreTake(mutexSem, portMAX_DELAY))
+          {
+            myGNSS.checkUblox();
+            xSemaphoreGive(mutexSem);
+          }
           myGNSS.checkCallbacks();
         }
       } // End attempt to connect
