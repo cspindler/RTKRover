@@ -37,7 +37,8 @@ struct TelemetryGnssFix
 };
 
 bool telemetryEmitGnssFix(const TelemetryGnssFix &fix);
-bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected);
+bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected,
+                            uint32_t battMv);
 bool telemetryEmitNtripStatus(TelemetryNtripState state, uint32_t reconnects,
                               uint32_t bytesRx);
 bool telemetryEmitImuStatus(uint8_t calibStatus, float reportRateHz,

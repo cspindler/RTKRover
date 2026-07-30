@@ -274,7 +274,7 @@ test(frame_seq_increments)
 test(frame_heartbeat_carries_fw_version)
 {
   drainTelemetry();
-  assertTrue(telemetryEmitHeartbeat(123456, -60, true));
+  assertTrue(telemetryEmitHeartbeat(123456, -60, true, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -291,6 +291,21 @@ test(frame_heartbeat_carries_fw_version)
     found = memcmp(frame + i, needle, nl) == 0;
   }
   assertTrue(found);
+}
+
+test(frame_heartbeat_carries_batt_mv)
+{
+  drainTelemetry();
+  assertTrue(telemetryEmitHeartbeat(123456, -60, true, 3900));
+
+  uint8_t frame[TELEMETRY_MAX_FRAME];
+  size_t n = telemetryPopFrame(frame, sizeof(frame));
+  assertMore(n, (size_t)4);
+
+  // batt_mv is the last pair in the map: key 16, then 3900 as a 2-byte uint.
+  const uint8_t want[] = {TELEM_HB_BATT_MV, 0x19, 0x0F, 0x3C};
+  assertTrue(bytesEqual(frame + n - sizeof(want), sizeof(want), want,
+                        sizeof(want)));
 }
 
 test(frame_error_msg_capped)

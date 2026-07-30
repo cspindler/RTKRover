@@ -147,6 +147,7 @@ This is the dead-zone dataset; do not thin it out.
 | `ntrip_connected` | bool |
 | `fw_version` | redundant with envelope, but lets the backend detect mismatches |
 | `dropped_frames` | cumulative count of telemetry frames dropped on-device (ring-buffer overflow) |
+| `batt_mv` | LiPo pack voltage in mV, read from the Feather's 2:1 divider on A13 (ADC1, unaffected by WiFi). Single-cell: ~4200 full, ~3300 empty. 0 = unknown. Consumers derive a percentage; the firmware ships no discharge curve |
 
 **`ntrip_status`** — on state change: `state` ("connected" / "disconnected" / "reconnecting"),
 `reconnects` (counter), `bytes_rx` (cumulative).
@@ -237,6 +238,7 @@ Type-specific keys start at 10 (`type` disambiguates, so numbers repeat across t
 | | 13 | `ntrip_connected` | bool |
 | | 14 | `fw_version` | text |
 | | 15 | `dropped_frames` | uint |
+| | 16 | `batt_mv` | uint |
 | `ntrip_status` | 10 | `state` | uint: 0 = disconnected, 1 = connected, 2 = reconnecting |
 | | 11 | `reconnects` | uint |
 | | 12 | `bytes_rx` | uint |

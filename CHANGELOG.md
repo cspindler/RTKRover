@@ -24,7 +24,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
     notifications silently); partial frames never leak across reconnects.
   - Event emitters: `gnss_fix` at 1 Hz (high-res lat/lon, fix/carrier type,
     accuracies, SIV, PDOP, correction age), `heartbeat` every 15 s
-    (free heap, WiFi RSSI, NTRIP state, fw version, dropped frames),
+    (free heap, WiFi RSSI, NTRIP state, fw version, dropped frames,
+    battery millivolts),
     `ntrip_status` on state transitions, `imu_status` every 60 s (measured
     report rate, calibration accuracy, reset count), `error` events with
     stable codes on the real failure paths (`wifi_disconnected`,
@@ -33,9 +34,23 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
     — one event per outage, never one per retry.
   - CTRL commands (§5.4): `0x01` set error-verbosity threshold, `0x02`
     immediate status dump.
+- **Battery reporting** (`src/battery.{h,cpp}`): pack voltage ships in every
+  heartbeat as `batt_mv` (§4.3/§5.3 key `16`, uint millivolts, 0 = unknown).
+  Raw millivolts, not a percentage - the discharge curve is a display concern
+  and does not belong in the wire format. Needs the matching key in
+  rwa-player's `TelemetryKeys.swift`.
+  - The long-standing "how to measure battery" note in `main.cpp` (ADC2 is
+    arbitrated against WiFi, so use an LC709203F fuel gauge or interleave
+    WiFi and ADC access) does not apply to this board: the Huzzah32's 2:1
+    divider is on A13 = GPIO35 = **ADC1**_CH7, which the WiFi driver never
+    blocks. No extra hardware, no interleaving. Note replaced with the
+    finding. Measured on hardware with WiFi associated: 4198–4200 mV across
+    heartbeats, i.e. stable to ±2 mV.
+  - Costs ~6.9 KB flash (78.0 % → 78.4 % of the 2 MB slot) for the ADC
+    calibration driver — relevant to the open OTA partition decision.
 - **Build-time version embedding**: `FW_VERSION` = semver + short git hash
   (+`-dirty`), generated into a gitignored header by `tools/git_version.py`.
-- **On-device unit tests**: 19 AUnit tests (CBOR encoder byte-exactness,
+- **On-device unit tests**: 20 AUnit tests (CBOR encoder byte-exactness,
   drop-oldest/wrap-around buffer semantics, wire framing). Debug builds run
   them in `setup()` before the WiFi wait, so they execute even with no
   hotspot in range.
@@ -55,6 +70,12 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 - Task stacks right-sized from measured watermarks: 35 KB → 21 KB total,
   freeing ~14 KB of heap. The NTRIP task was *grown* 7 → 9 KB — it had been
   running with a 280-byte margin.
+- `getBatteryVolts()` moved out of `main.cpp` into the new battery module (the
+  telemetry task needs it) and now reads via `analogReadMilliVolts()`, which
+  applies the per-chip eFuse ADC calibration. The previous
+  `analogRead() * 3.3 / 4095` is off by 100+ mV on the ESP32's non-linear ADC.
+  Reads are averaged over 8 samples; pin, divider ratio and sample count are
+  in `RTKRoverConfig.h`.
 - `platformio.ini`: shared `[env]` section; hardcoded `upload_port`/
   `monitor_port`/`test_port` removed (the port embeds one unit's serial
   number and goes stale on board swaps) — the tools discover the port.

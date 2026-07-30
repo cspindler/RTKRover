@@ -13,14 +13,6 @@
  *        - Status led for WiFi/BLE? on the device box or monitoring in app only?
  *        - Buzzer peep tone if lipo runs out of energy or show an blinky icon/notification in App
  *
- * @note How to measure battery:
- *        - First:  Since the ADC2 module is also used by the Wi-Fi, only one of
- *                  them could get the preemption when using together, which means
- *                  the adc2_get_raw() may get blocked until Wi-Fi stops, and
- *                  vice versa. (https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc.html)
- *        - Second: Easiest way, use a fuel gauge breakout board e. g. Adafruit_LC709203F
- *                  Complicated way, implement an alternating usage of WiFi and ADC2
- *
  * @version 0.43
  ******************************************************************************/
 
@@ -35,6 +27,7 @@
 #include <sdkconfig.h>
 #include <RTKRoverConfig.h>
 #include <CasterSecrets.h>
+#include <battery.h>
 #include <handle_wifi.h>
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
@@ -51,20 +44,6 @@
 Button2 rebootButton = Button2(REBOOT_BUTTON_PIN, INPUT, false, false);
 
 void buttonHandler(Button2 &btn);
-
-/*
-=================================================================================
-                                Battery
-=================================================================================
-*/
-// Messure half the battery voltage
-#define BAT_PIN                    A13
-/**
- * @brief Get the Battery Volts
- *
- * @return float Battery voltage
- */
-float getBatteryVolts(void);
 
 /*
 =================================================================================
@@ -274,6 +253,8 @@ void setup()
   // Board LED used for error codes (written in README.md)
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
+
+  batteryInit();
 
   blinkOneTime(1000, true);
   blinkOneTime(1000, true);
@@ -1261,20 +1242,6 @@ void task_bno_orientation_via_ble(void *pvParameters)
   vTaskDelete(NULL);
 
 } /*** end task_bno_orientation_via_ble ***/
-
-/*
-=================================================================================
-                                Battery
-=================================================================================
-*/
-float getBatteryVolts()
-{
-  // Vout = Dout * Vmax / Dmax
-  // Because battery volts are higher than Vmax, we use the voltage devider on
-  // Pin A13 (Huzzah ESP32, it may be different on other boards)
-  float batteryVolts = 2.0 * (analogRead(BAT_PIN) * 3.3 / 4095.0);
-  return batteryVolts;
-}
 
 /*
 =================================================================================

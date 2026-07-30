@@ -86,9 +86,10 @@ bool telemetryEmitGnssFix(const TelemetryGnssFix &fix)
   return b.commit();
 }
 
-bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected)
+bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected,
+                            uint32_t battMv)
 {
-  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 6);
+  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 7);
   b.w.key(TELEM_HB_UPTIME_MS);
   b.w.uintVal(millis());
   b.w.key(TELEM_HB_FREE_HEAP);
@@ -101,6 +102,8 @@ bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected
   b.w.textVal(FW_VERSION, 32);
   b.w.key(TELEM_HB_DROPPED_FRAMES);
   b.w.uintVal(telemetryDroppedFrames());
+  b.w.key(TELEM_HB_BATT_MV);
+  b.w.uintVal(battMv);
   return b.commit();
 }
 

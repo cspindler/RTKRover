@@ -6,6 +6,7 @@
 
 #include <atomic>
 
+#include "battery.h"
 #include "telemetry/telemetry.h"
 
 static BLECharacteristic *pTelemetryTx = nullptr;
@@ -139,11 +140,13 @@ static void telemetryDrainTask(void *pvParameters)
     if (dump || millis() - lastHeartbeat >= TELEMETRY_HEARTBEAT_MS)
     {
       lastHeartbeat = millis();
+      // ADC1 read: microseconds, and unaffected by WiFi (see src/battery.h).
+      uint32_t battMv = batteryMilliVolts();
       telemetryEmitHeartbeat(esp_get_free_heap_size(), WiFi.RSSI(),
-                             telemetryNtripConnected());
-      DBG.printf("telemetry: heartbeat%s, seq %u, dropped %u\n",
+                             telemetryNtripConnected(), battMv);
+      DBG.printf("telemetry: heartbeat%s, seq %u, dropped %u, batt %u mV\n",
                  dump ? " (status dump)" : "", telemetrySeqNow(),
-                 telemetryDroppedFrames());
+                 telemetryDroppedFrames(), battMv);
     }
 
     if (!linkConnected.load(std::memory_order_relaxed)) continue;

@@ -52,6 +52,7 @@ enum TelemetryHeartbeatKey : uint8_t {
   TELEM_HB_NTRIP_CONNECTED = 13,  // bool
   TELEM_HB_FW_VERSION      = 14,  // text
   TELEM_HB_DROPPED_FRAMES  = 15,  // uint, cumulative since boot
+  TELEM_HB_BATT_MV         = 16,  // uint, LiPo pack millivolts (0 = unknown)
 };
 
 // ntrip_status (type 3)

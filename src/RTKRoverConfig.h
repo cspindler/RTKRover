@@ -156,6 +156,17 @@ PMCID: PMC9123378. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9123378/
 
 /*
 =================================================================================
+                          Battery settings
+=================================================================================
+*/
+// A13 = GPIO35 = ADC1_CH7 on the Huzzah32, behind a 2:1 divider off BAT.
+// ADC1, so WiFi never blocks the read (see src/battery.h).
+#define BATTERY_ADC_PIN                      A13
+#define BATTERY_DIVIDER_RATIO                2
+#define BATTERY_ADC_SAMPLES                  8    // cheap noise average
+
+/*
+=================================================================================
                           Button(s) settings
 =================================================================================
 */
