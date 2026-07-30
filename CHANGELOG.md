@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 (`FW_VERSION_BASE` in `src/RTKRoverConfig.h`, reported with the build's git hash
 in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
-## [0.44.0] - 2026-07-29 (not yet tagged)
+## [0.44.0] - 2026-07-30
 
 ### Added
 

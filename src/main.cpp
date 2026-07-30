@@ -7,13 +7,9 @@
  *        positioning using Sparkfun Real Time Kinematics
  * <br>
  * @todo  - Upgrade to Sparkfun RTK Library v3
- *        - Calibration button (?)
- *        - Test: BNO080 found/connected
- *        - Test: BLE
- *        - Status led for WiFi/BLE? on the device box or monitoring in app only?
- *        - Buzzer peep tone if lipo runs out of energy or show an blinky icon/notification in App
  *
- * @version 0.43
+ * @version 0.44.0
+ * @date 2026-07-30
  ******************************************************************************/
 
 
