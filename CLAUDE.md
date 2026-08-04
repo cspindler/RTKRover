@@ -93,10 +93,21 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 
 1. The board physically plugged in over USB (nothing else is a substitute, the
    port cannot be reached remotely).
-2. `src/CasterSecrets.h` present (gitignored; copy from `CasterSecrets_example.h`)
-   and a reachable WiFi/NTRIP caster.
+2. `tools/fleet-secrets.ini` present (gitignored; copy from
+   `tools/fleet-secrets_example.ini`) and a reachable WiFi/NTRIP caster.
+   `src/CasterSecrets.h` is generated from it at build time by
+   `tools/gen_caster_secrets.py` (extra_script, like the fw-version header) —
+   never edit the header by hand. Per-unit facts are keyed by the board label
+   from `tools/known-boards.txt`; each unit has its own caster username
+   (`musikbasel01`, `musikbasel02`, …). Board selection: `RTK_BOARD` (label or
+   serial; `flash.sh` exports its board argument), else the single attached
+   unit. With neither, the previous header is kept (or an empty placeholder is
+   written on a fresh clone) so hardware-less builds still work; a selected
+   board with incomplete secrets fails the build on purpose.
 3. Mobile device with RWA Client running, provding the WiFi hotpot:
-   - Add WiFi name to `src/CasterSecrets.h` (or the other way around: Set WiFi name in caster secrets and set your mobile-device / hotspot name to the same).
+   - Hotspot name = board label (e.g. `rwa-hs-2`), so the SSID needs no config
+     of its own. A `wifi_ssid` override per board section exists for hotspots
+     not yet renamed.
    - Add `rtkrover-<esp32-slug>` as headtracker (BT) name in RWA Player, `<esp32-slug>` being the last 6 characters of the ESP32 serial number (i.e. `2d3810`)
 
 ## Conventions & constraints

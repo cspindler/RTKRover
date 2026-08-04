@@ -13,7 +13,13 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 ENV_NAME="${1:-featheresp32_debug}"
-PORT=$(tools/find-board.sh "${2:-}") || exit 2
+
+# Export the board choice so the build's gen_caster_secrets.py bakes the same
+# unit's credentials that find-board.sh resolves the port for.
+if [ -n "${2:-}" ]; then
+  export RTK_BOARD="$2"
+fi
+PORT=$(tools/find-board.sh) || exit 2
 
 echo "flash: $ENV_NAME -> $PORT" >&2
 exec pio run -e "$ENV_NAME" -t upload --upload-port "$PORT"

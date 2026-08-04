@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 (`FW_VERSION_BASE` in `src/RTKRoverConfig.h`, reported with the build's git hash
 in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
+## [Unreleased]
+
+### Changed
+
+- **Per-unit credentials are generated at build time, not hand-edited**:
+  `src/CasterSecrets.h` is now a build artifact produced by
+  `tools/gen_caster_secrets.py` (extra_script) from two sources joined by
+  board label: the committed fleet map `tools/known-boards.txt` and the
+  gitignored `tools/fleet-secrets.ini` (shared `[caster]` settings plus one
+  section per unit: `caster_user` = `...01`..`05`, `wifi_pw`, optional
+  per-board overrides). Board selection: `RTK_BOARD` env var (label or
+  serial; `flash.sh` exports its board argument), else the single attached
+  unit. Incomplete secrets fail the build only when the board was requested
+  explicitly or an upload is queued; a plain build keeps the previous header
+  (or writes an empty placeholder on a fresh clone), so hardware-less builds
+  still work.
+- **WiFi SSID convention**: SSID = board label: name each phone hotspot
+  after its unit (e.g. `rwa-hs-2`) and the SSID needs no configuration;
+  `wifi_ssid` in a board section overrides it for hotspots not yet renamed.
+
+### Removed
+
+- `kDeviceName` from `CasterSecrets.h`. It's dead code; the BLE name is derived
+  from the chip ID at runtime (`getDeviceName`).
+- `src/CasterSecrets_example.h`, superseded by
+  `tools/fleet-secrets_example.ini`.
+
 ## [0.44.0] - 2026-07-30
 
 ### Added

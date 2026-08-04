@@ -46,27 +46,28 @@ more information in the [datasheet](https://www.ceva-dsp.com/wp-content/uploads/
 
 ZED-F9P:
 
-If you are NOT using the web form of the RTKBaseManager, then to connect to a caster you will need to create (from `CasterSecrets_example.h`) and fill out the `CasterSecrets.h` that lives in your src folder with your own credentials (and replace the vars with the k prefixed values e.g.: `mountPoint` to `kMountPoint` in the [`main.cpp`](./src/main.cpp)).
+Caster and WiFi credentials live in `tools/fleet-secrets.ini` (gitignored; copy
+from `tools/fleet-secrets_example.ini`), keyed by the board labels from
+`tools/known-boards.txt`. At build time `tools/gen_caster_secrets.py` generates
+`src/CasterSecrets.h` from them for the selected unit — select it with the
+`RTK_BOARD` env var (label or CP2104 serial), or just have exactly one known
+unit attached. Do not edit the generated header by hand.
 
-```cpp
-#ifndef CASTER_SECRETS_H
-#define CASTER_SECRETS_H
-const char kCasterHost[] = "rtk2go.com";
-const char kCasterPort[] = "2101";
-const char kMountPoint[] = "YOUR_MOUNT_POINT";
-const char kCasterUser[] = "YOUR_USER_EMAIL";        // User must provide their own email address to use RTK2Go
-const char kCasterPass[] = "";                       // Not neccecary, more info: rtk2go.com
+```ini
+[caster]
+host = rtk2go.com
+port = 2101
+mount = YOUR_MOUNT_POINT
+pass =
 
-// Device name
-const char kDeviceName[] = "YOUR_DEVICE_NAME";
-
-// WiFi access
-const char kWifiSsid[] = "YOUR_SSID_WITHOUT_SPACES"; // Wifi to connect the rover with
-const char kWifiPw[] = "YOUR_WIFI_PASSWORD";
-
-#endif /*** CASTER_SECRETS_H ***/
-
+[rwa-hs-1]
+caster_user = YOUR_CASTER_USER_01
+wifi_pw = HOTSPOT_PASSWORD_OF_UNIT_1
 ```
+
+The WiFi SSID equals the board label (name the phone hotspot after the unit);
+`wifi_ssid` in a board section overrides that. The BLE device name is derived
+from the chip ID at runtime and is not configured anywhere.
 
 The mklittlefs file in the root dir you have to [get](https://github.com/earlephilhower/mklittlefs/releases) depending on your OS.
 If you have the Arduino IDE installed, you can borrow it from there too. On macOS you can find it here: `~/Library/Arduino15/packages/esp32/tools/mklittlefs/3.0.0-gnu12-dc7f933/mklittlefs`.  Help for setup the file system you can find [here](https://randomnerdtutorials.com/esp8266-nodemcu-vs-code-platformio-littlefs/). This project was created on macOS (silicon).
