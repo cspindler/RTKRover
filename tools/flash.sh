@@ -7,12 +7,13 @@
 # Usage:
 #   tools/flash.sh [env] [board]
 #
-# Defaults: env featheresp32_debug (serial logging on), board auto-discovered.
+# Defaults: env featheresp32 (serial logging off), board auto-discovered.
+# use featheresp32_debug to turn on serial logging and startup gating
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-ENV_NAME="${1:-featheresp32_debug}"
+ENV_NAME="${1:-featheresp32}"
 
 # Export the board choice so the build's gen_caster_secrets.py bakes the same
 # unit's credentials that find-board.sh resolves the port for.
