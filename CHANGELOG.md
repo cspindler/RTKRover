@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-08-04
+
 ### Changed
 
 - **Per-unit credentials are generated at build time, not hand-edited**:
