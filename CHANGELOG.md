@@ -9,6 +9,16 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Removed
+
+- **RTK accuracy characteristic (`713D0006-...`)** and its plumbing
+  (`xQueueAccuracy`, the send-if-changed block in `updatePosition`). No
+  consumer was left: rwa-player reads accuracy from the telemetry
+  `gnss_fix` event (`h_acc_mm`, 1 Hz), and rwa-receiver dropped its
+  subscription in the same change. The position accuracy value itself is
+  still read every cycle — it gates the `713D0004` position stream
+  (`MIN_ACCEPTABLE_ACCURACY_MM`) and feeds the telemetry sample.
+
 ## [0.44.1] - 2026-08-04
 
 ### Changed

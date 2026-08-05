@@ -126,7 +126,6 @@ class MyServerCallbacks: public BLEServerCallbacks
 
 BLECharacteristic *pHeadtrackerCharacteristic;
 BLECharacteristic *pRealtimeKinematicsCharacteristic;
-BLECharacteristic *pRTKAccuracyCharacteristic;
 
 void setupBLE(void);
 /*
@@ -190,7 +189,7 @@ typedef struct Coord
 } coord_t;
 
 const uint8_t QUEUE_SIZE = 2;
-xQueueHandle xQueueAccuracy, xQueueCoord;
+xQueueHandle xQueueCoord;
 static xSemaphoreHandle mutexSem;
 
 /**
@@ -459,7 +458,6 @@ bool setupGNSS()
 
 void updatePosition()
 {
-  static int32_t old_accuracy = -1;
   coord_t coord;
 
   myGNSS.checkUblox();
@@ -491,18 +489,6 @@ void updatePosition()
       xQueueReceive(xQueueCoord, &discard, 0);
       xQueueSend(xQueueCoord, &coord, 0);
     }
-  }
-
-  // Send accuracy if changed only
-  if (accuracy != old_accuracy)
-  {
-    if (xQueueSend(xQueueAccuracy, &accuracy, 0) != pdPASS)
-    {
-      int32_t discard;
-      xQueueReceive(xQueueAccuracy, &discard, 0);
-      xQueueSend(xQueueAccuracy, &accuracy, 0);
-    }
-    old_accuracy = accuracy;
   }
 
   // 1 Hz gnss_fix telemetry sample (PROJECT-PLAN.md par. 4.3, the dead-zone
@@ -975,14 +961,6 @@ void setupBLE(void)
     BLECharacteristic::PROPERTY_NOTIFY  // We only use notify characteristic (fastest -> no response)
   );
 
-  pRTKAccuracyCharacteristic = pService->createCharacteristic(
-    RTK_ACCURACY_CHARACTERISTIC_UUID,
-    //  BLECharacteristic::PROPERTY_READ   |
-    //  BLECharacteristic::PROPERTY_WRITE  |
-    //  BLECharacteristic::PROPERTY_INDICATE |
-    BLECharacteristic::PROPERTY_NOTIFY // We only use notify characteristic (fastest -> no response)
-  );
-
   pHeadtrackerCharacteristic->addDescriptor(new BLE2902());
   pHeadtrackerCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
   pHeadtrackerCharacteristic->setValue(deviceName.c_str());
@@ -990,8 +968,6 @@ void setupBLE(void)
   pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
   // pRealtimeKinematicsCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
   // pRealtimeKinematicsCharacteristic->setValue(deviceName.c_str());
-
-  pRTKAccuracyCharacteristic->addDescriptor(new BLE2902());
 
   pService->start();
 
@@ -1042,7 +1018,6 @@ void setupBNO080()
 void xQueueSetup()
 {
   xQueueCoord  = xQueueCreate( QUEUE_SIZE, sizeof( coord_t ) );
-  xQueueAccuracy  = xQueueCreate( QUEUE_SIZE, sizeof( long ) );
 }
 
 void task_send_rtk_position_via_ble(void *pvParameters)
@@ -1050,14 +1025,11 @@ void task_send_rtk_position_via_ble(void *pvParameters)
   (void)pvParameters;
 
   String latLonStr((char *)0);
-  // String accuracyMmStr((char *)0);
-  String accuracyStr((char *)0);
   // Latitude: 9, delimiter: 1, latitudeHp: 2, longitude: 9, delimiter: 1, longitudeHp: 2,
   latLonStr.reserve(27);
-  accuracyStr.reserve(5);
 
   coord_t coord;
-  int32_t lat, lon, accuracy;
+  int32_t lat, lon;
   int8_t latHp, lonHp;
 
   while (!bleConnected) blinkOneTime(100, true);
@@ -1097,18 +1069,6 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         // DBG.print(F("latLonStr.length(): "));DBG.println(latLonStr.length());
         pRealtimeKinematicsCharacteristic->setValue(latLonStr.c_str());
         pRealtimeKinematicsCharacteristic->notify();
-      }
-
-      if (xQueueReceive( xQueueAccuracy, &accuracy, ( TickType_t ) 10 ) == pdPASS)
-      {
-        accuracyStr = String(accuracy);
-        // DBG.print(F("accuracyStr.length(): "));DBG.println(accuracyStr.length());
-        pRTKAccuracyCharacteristic->setValue(accuracyStr.c_str());
-        pRTKAccuracyCharacteristic->notify();
-
-        // DBG.print(F("Received accuracy = "));
-        // DBG.print(accuracy);
-        // DBG.println(F(" mm"));
       }
 
       /*  Measure stack size (last was 9356) */

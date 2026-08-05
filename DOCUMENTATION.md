@@ -19,9 +19,8 @@
 ### Inter-Task Communication
 
 - Mutex Semaphore: Protects shared GNSS resources
-- Two Queues:
+- One Queue:
   - `xQueueCoord`: Position coordinates
-  - `xQueueAccuracy`: Position accuracy data
 - Global Flag: `beginPositioning` - synchronizes position reading with correction data availability
 
 ### Task Dependencies
@@ -43,7 +42,7 @@ flowchart TD
     E --> F[Create FreeRTOS Resources]
 
     F --> G[Create Mutex Semaphore]
-    G --> H[Create Queues:<br/>xQueueCoord & xQueueAccuracy]
+    G --> H[Create Queue:<br/>xQueueCoord]
 
     H --> I[Create FreeRTOS Tasks]
     I --> T1[Task 1:<br/>task_rtk_get_corrrection_data<br/>Core 0, Priority 2]
@@ -66,8 +65,7 @@ flowchart TD
     T2 --> T2A[Wait for beginPositioning Flag]
     T2A --> T2B[Get Position Data<br/>Using Mutex]
     T2B --> T2C[Send Coordinates to xQueueCoord]
-    T2C --> T2D[Send Accuracy to xQueueAccuracy<br/>if changed]
-    T2D --> T2E[Delay 100ms]
+    T2C --> T2E[Delay 100ms]
     T2E --> T2B
 
     %% Task 3 Details
@@ -82,9 +80,8 @@ flowchart TD
     %% Task 4 Details
     T4 --> T4A[Wait for BLE Connection]
     T4A --> T4B[Receive from xQueueCoord]
-    T4B --> T4C[Receive from xQueueAccuracy]
-    T4C --> T4D[Format Position Data]
-    T4D --> T4E[Send via BLE Characteristics]
+    T4B --> T4D[Format Position Data]
+    T4D --> T4E[Send via BLE Characteristic]
     T4E --> T4F[Delay 100ms]
     T4F --> T4B
 
