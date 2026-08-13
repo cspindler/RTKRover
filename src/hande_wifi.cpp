@@ -2,6 +2,11 @@
 
 bool setupWiFi()
 {
+  // Start the driver and cap TX power before the first scan. The scan is
+  // the first radio-on and TX at default power browns out weak batteries.
+  WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_TX_POWER);
+
   while (!checkNetworkAvailable(kWifiSsid) )
   {
     DBG.print(F("Waiting for HotSpot "));
@@ -17,6 +22,9 @@ bool setupStationMode(const char* ssid, const char* password)
   WiFi.softAPdisconnect(true);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_STA);
+  // disconnect(true) stops the driver, which resets TX power to the
+  // 19.5 dBm default. Re-apply the cap before begin() associates.
+  WiFi.setTxPower(WIFI_TX_POWER);
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
 

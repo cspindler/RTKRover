@@ -69,6 +69,12 @@
 */
 #define DEVICE_TYPE                  "rtkrover"
 #define DEFAULT_KEY                  "12345678"
+// Cap radio TX power from the first radio-on. The default 19.5 dBm draws
+// TX spikes big enough to brown out the 3V3 rail on battery power (boot
+// loop until WiFi init, observed in field tests 2026-08). The hotspot is
+// the wearer's own phone, so 11 dBm keeps ample link margin. Check
+// heartbeat wifi_rssi before lowering further (WIFI_POWER_8_5dBm).
+#define WIFI_TX_POWER                WIFI_POWER_11dBm
 
 /*
 =================================================================================
