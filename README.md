@@ -87,7 +87,7 @@ Update the serial-port paths in [`platformio.ini`](./platformio.ini) to the valu
 * 1.0s 2x: started setup (blocking)
 * 0.125s 2x 1.0s 1x (watch for this to spot reboots) (blocking)
 * `setupWiFi`
-* 0.125s 4x (blocking)
+* 0.125s 4x (blocking, after first WiFi connection attempt)
 * while wait for WiFi Connection
   * 1.0s, 0.1s (blocking)
 * `setupBLE` no blinking

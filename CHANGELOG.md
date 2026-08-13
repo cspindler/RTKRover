@@ -9,6 +9,42 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-08-13
+
+### Added
+
+- **Reset-reason telemetry** (`reportResetReason()` in `main.cpp`): the boot
+  cause is read via `esp_reset_reason()` at the top of `setup()` and, for
+  abnormal causes, emitted as a severity-2 `error` event with stable codes
+  `reset_brownout`, `reset_panic`, `reset_wdt`; the message carries the raw
+  reason number and the battery voltage at boot. Power-on / software reset /
+  deep-sleep wake emit nothing. The event waits in the telemetry ring until BLE
+  connects, so field reboots show up in the Diagnostics tab and Grafana instead
+  of only as a repeating boot blink pattern. Additive `error.code` values per
+  PROJECT-PLAN.md §4.4, no schema change, no decoder change.
+
+### Changed
+
+- **Brownout mitigation at WiFi init** (field tests 2026-07..08: units on
+  battery power boot-looped at first radio-on; the AP2112K 3V3 rail, also
+  carrying the ZED-F9P and BNO080, sags below the brownout threshold under
+  full-power TX spikes):
+
+  - WiFi TX power is capped at 11 dBm (`WIFI_TX_POWER` in `RTKRoverConfig.h`)
+    from the first radio-on, roughly half the peak TX current of the 19.5 dBm
+    default. The hotspot is the wearer's own phone, so link margin is OK;
+    check heartbeat `wifi_rssi` before lowering further. The cap is re-applied
+    in `setupStationMode()` because `WiFi.disconnect(true)` stops the driver,
+    which silently resets TX power to default.
+
+  - `setupWiFi()` no longer pre-scans for the hotspot: the old
+    wait-until-visible loop ran a full-power all-channel active scan every
+    second: for a unit powered on before the phone's hotspot, minutes of
+    repeated worst-case current spikes. `WiFi.begin()` now probes only the
+    target SSID; if the hotspot is not up the attempt times out after 10 s and
+    the existing retry loop in `setup()` blinks and tries again.
+    `checkNetworkAvailable()` is gone (`setupWiFi()` was its only caller).
+
 ### Removed
 
 - **RTK accuracy characteristic (`713D0006-...`)** and its plumbing
