@@ -2,18 +2,11 @@
 
 bool setupWiFi()
 {
-  // Start the driver and cap TX power before the first scan. The scan is
-  // the first radio-on and TX at default power browns out weak batteries.
+  // Start the driver and cap TX power before any radio activity: TX at default
+  // power browns out weak batteries. No pre-scan for the hotspot.
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_TX_POWER);
 
-  while (!checkNetworkAvailable(kWifiSsid) )
-  {
-    DBG.print(F("Waiting for HotSpot "));
-    DBG.print(kWifiSsid);
-    DBG.println(F(" to appear..."));
-    vTaskDelay(1000/portTICK_RATE_MS);
-  }
   return setupStationMode(kWifiSsid, kWifiPw);
 }
 
@@ -56,34 +49,6 @@ bool setupStationMode(const char* ssid, const char* password)
     DBG.println(WiFi.localIP()); */
     return true;
   }
-}
-
-bool checkNetworkAvailable(const String& ssid)
-{
-  u_int8_t n = WiFi.scanNetworks();
-  if (n == 0)
-  {
-    /* DBG.println(F("no networks found")); */
-    return false;
-  }
-  else
-  {
-    /* DBG.print(n);
-    DBG.println(F(" networks found")); */
-    for (u_int8_t i = 0; i < n; ++i)
-    {
-      if (WiFi.SSID(i) == ssid)
-      {
-        /* DBG.println(F("Target network found:"));
-        DBG.print(WiFi.SSID(i));
-        DBG.print(F(" ("));
-        DBG.print(WiFi.RSSI(i));
-        DBG.println(F("dB)")); */
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 String getDeviceName(const String& prefix)

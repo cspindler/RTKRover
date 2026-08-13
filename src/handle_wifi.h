@@ -7,13 +7,15 @@
 #include <CasterSecrets.h>
 
 /**
- * @brief Setup WiFi connection by scanning for the target network and connecting
+ * @brief Setup WiFi connection to the target network (kWifiSsid)
  *
- * This function waits for the target WiFi network (defined by kWifiSsid) to become
- * available by scanning, then attempts to connect to it using station mode.
+ * Starts the driver in station mode with the TX power cap applied, then
+ * attempts one connection via setupStationMode(). No scan: begin() probes
+ * only the target SSID. If the hotspot is not up yet the attempt times out;
+ * the caller is expected to retry.
  *
  * @return true If WiFi connection was successfully established
- * @return false If WiFi connection failed
+ * @return false If the connection attempt timed out or failed
  */
 bool setupWiFi();
 
@@ -30,19 +32,6 @@ bool setupWiFi();
  * @return false If connection failed within the timeout period
  */
 bool setupStationMode(const char* ssid, const char* password);
-
-/**
- * @brief Check if a specific WiFi network is available by scanning
- *
- * This function performs a WiFi network scan and searches for a network
- * with the specified SSID. It returns true if the network is found among
- * the available networks.
- *
- * @param ssid The SSID of the network to search for
- * @return true If the specified network was found in the scan results
- * @return false If no networks were found or the specified SSID was not detected
- */
-bool checkNetworkAvailable(const String& ssid);
 
 /**
  * @brief Generate a unique device name using a prefix and chip ID
