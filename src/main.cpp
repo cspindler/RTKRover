@@ -21,6 +21,7 @@
 #include <SparkFun_BNO080_Arduino_Library.h>
 #include <utility/imumaths.h>
 #include <sdkconfig.h>
+#include <esp_system.h> // esp_reset_reason()
 #include <RTKRoverConfig.h>
 #include <CasterSecrets.h>
 #include <battery.h>
@@ -243,6 +244,36 @@ void blinkOneTime(int blinkTime, bool doNotBlock);
  */
 void wipeWiFiCredentials(void);
 
+/**
+ * @brief Report why the chip last reset. Abnormal causes (brownout, panic,
+ * watchdog) become error events so field reboots show up in Grafana instead of
+ * only as a repeating boot blink pattern. The event waits in the telemetry ring
+ * until BLE connects, so emitting this early in setup() is safe.
+ */
+static void reportResetReason(void)
+{
+  const esp_reset_reason_t reason = esp_reset_reason();
+  DBG.printf("Reset reason: %d\n", (int)reason);
+
+  const char *code = NULL;
+  switch (reason)
+  {
+    case ESP_RST_BROWNOUT: code = "reset_brownout"; break;
+    case ESP_RST_PANIC:    code = "reset_panic";    break;
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      code = "reset_wdt";      break;
+    default: break; // poweron / sw / deepsleep are normal, no event
+  }
+  if (code != NULL)
+  {
+    char msg[48];
+    snprintf(msg, sizeof(msg), "abnormal reset (reason %d), batt %u mV",
+             (int)reason, (unsigned)batteryMilliVolts());
+    telemetryEmitError(2, code, msg);
+  }
+}
+
 void setup()
 {
   // Board LED used for error codes (written in README.md)
@@ -261,6 +292,8 @@ void setup()
   while (!Serial.available()) delay(100);
   while (Serial.available()) Serial.read();
   #endif
+
+  reportResetReason();
 
   #ifdef TESTING
   // Run the AUnit tests here rather than relying on loop(): with no WiFi
