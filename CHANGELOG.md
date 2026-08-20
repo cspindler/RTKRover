@@ -9,6 +9,23 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- **NTRIP caster-response timeout wedged the correction task until reboot**
+  (`task_rtk_get_corrrection_data` in `main.cpp`): when the caster did not
+  answer the mount-point request within `CONNECTION_TIMEOUT_MS`, the timeout
+  branch stopped the client and issued `continue` - but inside the
+  response-wait `while`, not the task loop (the block came from SparkFun's
+  Example15-NTRIPClient, where it was a `return`).
+
+  With the client stopped, `available()` stays 0, so the task spun on "Caster
+  timed out!" forever: no corrections, `beginPositioning` never set, hence no
+  RTK position frames and no `gnss_fix` telemetry for the rest of the boot.
+
+  The timeout now breaks out of the wait loop and retries the connection from
+  the top of the task loop, and emits a once-per-outage `ntrip_connect_failed`
+  error ("caster response timeout").
+
 ### Changed
 
 - **Fleet-configured BLE name** (`ble_name` in `tools/fleet-secrets.ini`,

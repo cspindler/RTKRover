@@ -790,18 +790,30 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(serverRequest);
         ntripClient.write(serverRequest, strlen(serverRequest));
 
-        // Wait for response
+        // Wait for response.
+        // The timeout must leave this wait loop before retrying.
         unsigned long timeout = millis();
+        bool casterTimedOut = false;
         while (ntripClient.available() == 0)
         {
           if (millis() - timeout > CONNECTION_TIMEOUT_MS)
           {
             ntripClient.stop(); // Too many requests with wrong settings will lead to bann, stop here
             DBG.println(F("Caster timed out!"));
-            vTaskDelay(5000/portTICK_PERIOD_MS);
-            continue; // skip to next iteration and retry
+            casterTimedOut = true;
+            break;
           }
           vTaskDelay(1000/portTICK_PERIOD_MS);
+        }
+        if (casterTimedOut)
+        {
+          if (!outageErrorEmitted)
+          {
+            outageErrorEmitted = true;
+            telemetryEmitError(1, "ntrip_connect_failed", "caster response timeout");
+          }
+          vTaskDelay(5000/portTICK_PERIOD_MS);
+          continue; // skip to next iteration and retry
         }
 
         // Check reply
