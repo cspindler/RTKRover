@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.44.3] - 2026-08-20
+
 ### Fixed
 
 - **NTRIP caster-response timeout wedged the correction task until reboot**
@@ -43,6 +45,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   `peripheral.name` kept returning the old name, so exact-name matching in the
   iOS apps could never see the device's real name. The apps now also match the
   advertised local name (rwa-player / rwa-receiver, changelogs there).
+
+## [0.44.2] - 2026-08-13
 
 ### Added
 
