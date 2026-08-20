@@ -5,8 +5,12 @@
 #   tools/fleet-secrets.ini   (gitignored) caster credentials + per-board secrets
 #
 # The WiFi SSID equals the board label (name the phone hotspot after the unit)
-# unless the board's section sets wifi_ssid. The BLE name is derived from the
-# chip ID at runtime (getDeviceName), so neither value is duplicated here.
+# unless the board's section sets wifi_ssid. The BLE name also defaults to the
+# board label, unless the board's section sets ble_name.
+# Result: one identity per unit: sticker, hotspot and BLE all match.
+# BLE names must be unique across the fleet and fit the scan response (max 29
+# bytes); both are checked here. An empty kBleName (placeholder builds) falls
+# back to the chip-id name at runtime (getDeviceName).
 #
 # Board selection, in order:
 #   1. RTK_BOARD env var (label or CP2104 serial) -- flash.sh exports this
@@ -29,6 +33,10 @@ PROJECT_DIR = env["PROJECT_DIR"]  # noqa: F821
 HEADER = os.path.join(PROJECT_DIR, "src", "CasterSecrets.h")
 BOARDS_FILE = os.path.join(PROJECT_DIR, "tools", "known-boards.txt")
 SECRETS_FILE = os.path.join(PROJECT_DIR, "tools", "fleet-secrets.ini")
+
+# The BLE name is carried in the 31-byte scan response as a
+# Complete Local Name TLV (2 bytes overhead).
+BLE_NAME_MAX = 29
 
 
 def fail(msg):
@@ -112,6 +120,24 @@ def existing_header_board():
     return "(hand-written, pre-generator)"
 
 
+def migrate_kept_header():
+    """Add constants that post-date a kept header, so it still compiles."""
+    with open(HEADER) as f:
+        content = f.read()
+    if "kBleName" in content:
+        return
+    addition = (
+        '// added by generator migration: empty = chip-id BLE name fallback\n'
+        'const char kBleName[] = "";\n'
+    )
+    marker = "\n#endif"
+    if marker not in content:
+        return
+    with open(HEADER, "w") as f:
+        f.write(content.replace(marker, "\n" + addition + marker, 1))
+    print("gen_caster_secrets: added missing kBleName to kept header")
+
+
 def keep_or_placeholder(reason):
     kept = existing_header_board()
     if kept is not None:
@@ -119,6 +145,7 @@ def keep_or_placeholder(reason):
             "gen_caster_secrets: %s; keeping existing src/CasterSecrets.h "
             "(board: %s)" % (reason, kept)
         )
+        migrate_kept_header()
         return
     print(
         "gen_caster_secrets: WARNING: %s and no existing header; writing "
@@ -127,7 +154,7 @@ def keep_or_placeholder(reason):
     )
     names = [
         "kCasterHost", "kCasterPort", "kMountPoint", "kCasterUser",
-        "kCasterPass", "kWifiSsid", "kWifiPw",
+        "kCasterPass", "kWifiSsid", "kWifiPw", "kBleName",
     ]
     write_if_changed(render("(none -- placeholder)", [(n, "") for n in names]))
 
@@ -187,6 +214,28 @@ def main():
         wifi_pw = ""
     wifi_ssid = board.get("wifi_ssid", label)
 
+    # BLE name: board label unless overridden.
+    # Validate fleet-wide (a duplicate makes two units indistinguishable).
+    ble_names = {}
+    for section in cfg.sections():
+        if section == "caster":
+            continue
+        name = cfg[section].get("ble_name", section).strip()
+        if not name:
+            fail("[%s] in %s has an empty ble_name" % (section, SECRETS_FILE))
+        if len(name.encode("utf-8")) > BLE_NAME_MAX:
+            fail(
+                "[%s] ble_name '%s' exceeds %d bytes (BLE scan response limit)"
+                % (section, name, BLE_NAME_MAX)
+            )
+        if name in ble_names:
+            fail(
+                "duplicate BLE name '%s' for [%s] and [%s] in %s"
+                % (name, ble_names[name], section, SECRETS_FILE)
+            )
+        ble_names[name] = section
+    ble_name = cfg[label].get("ble_name", label).strip()
+
     values = [
         ("kCasterHost", caster("host")),
         ("kCasterPort", caster("port")),
@@ -195,6 +244,7 @@ def main():
         ("kCasterPass", caster("pass")),
         ("kWifiSsid", wifi_ssid),
         ("kWifiPw", wifi_pw),
+        ("kBleName", ble_name),
     ]
     if missing:
         incomplete(
@@ -204,8 +254,8 @@ def main():
         return
     write_if_changed(render(label, values))
     print(
-        "gen_caster_secrets: src/CasterSecrets.h for %s (ssid: %s, caster user: %s)"
-        % (label, wifi_ssid, values[3][1])
+        "gen_caster_secrets: src/CasterSecrets.h for %s (ssid: %s, ble: %s, "
+        "caster user: %s)" % (label, wifi_ssid, ble_name, values[3][1])
     )
 
 

@@ -49,6 +49,15 @@ void buttonHandler(Button2 &btn);
 */
 float bleConnected = false; // TODO: deglobalize this
 
+// Fleet-configured BLE name (fleet-secrets.ini via CasterSecrets.h), empty on
+// placeholder builds -> fall back to the chip-id name.
+static String getBleName()
+{
+  if (kBleName[0] != '\0')
+    return String(kBleName);
+  return getDeviceName(DEVICE_TYPE);
+}
+
 class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
 {
   void onWrite(BLECharacteristic *pHeadtrackerCharacteristic)
@@ -330,7 +339,7 @@ void setup()
   }
 
   DBG.print(F("BLE Device name: "));
-  DBG.println(getDeviceName(DEVICE_TYPE));
+  DBG.println(getBleName());
 
   setupBLE();
 
@@ -972,7 +981,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 */
 void setupBLE(void)
 {
-  String deviceName = getDeviceName(DEVICE_TYPE);
+  String deviceName = getBleName();
   BLEDevice::init(deviceName.c_str());
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());

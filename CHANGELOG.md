@@ -9,7 +9,23 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
-## [0.44.2] - 2026-08-13
+### Changed
+
+- **Fleet-configured BLE name** (`ble_name` in `tools/fleet-secrets.ini`,
+  generated into `CasterSecrets.h` as `kBleName`): the advertised BLE name now
+  defaults to the board label (e.g. `rwa-hs-3`), so sticker, phone hotspot and
+  BLE scan all show the same identity. You can override it with `ble_name` in a
+  board's section. The generator enforces fleet-wide unqiue names and the
+  29-byte scan-response limit, and migrates kept headers by appending an empty
+  `kBleName`. An empty `kBleName` (placeholder builds, kept pre-migration
+  headers) falls back to the previous chip-id scheme (`rtkrover-<chipid>`,
+  `getBleName()` in `main.cpp`), so unprovisioned builds keep working.
+
+  Background: units renamed across firmware generations (captive-portal names
+  like `rtkrover_3` -> chip-id names) exposed iOS's persistent GAP-name cache:
+  `peripheral.name` kept returning the old name, so exact-name matching in the
+  iOS apps could never see the device's real name. The apps now also match the
+  advertised local name (rwa-player / rwa-receiver, changelogs there).
 
 ### Added
 
