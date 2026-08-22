@@ -42,7 +42,17 @@ Note on naming rwa-player: The app/repo previously was called rwa-client. There 
 
 ### Identity & privacy
 
-- Devices carry **fixed, self-assigned device IDs** (e.g. `hs-01` … `hs-10`).
+- Each headset assembly has a fixed name (label, device ID), assigned at build
+  time from the fleet config (`ble_name` in `tools/fleet-secrets.ini`,
+  defaulting to the section header, e.g. `rwa-hs-2`, the "assembly label"). The
+  same name is on the sticker, on the phone's hotspot and in the BLE
+  advertisement. BLE names for assemblies without an entry in fleet-secrets.ini
+  fall back to `rtkrover-<chip-id>`.
+- Phones are named the by the same label as the corresponding headset assembly,
+  iOS chooses that name as the hotspot name. The settings specify yet hand-typed name,
+  as we avoid the hassle of getting permission by apple to read the phones' name.
+  This name / ID is used to identify telemetry in the backend, and can be provisioned
+  or entered by hand.
 - Visitors are not identifiable (we provide the devices). No PII is collected.
 
 ---

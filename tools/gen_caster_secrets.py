@@ -1,26 +1,24 @@
 # PlatformIO extra_script: generate src/CasterSecrets.h from the fleet files.
 #
 # Single source of truth for per-unit configuration:
-#   tools/known-boards.txt    (committed)  CP2104 serial -> board label
-#   tools/fleet-secrets.ini   (gitignored) caster credentials + per-board secrets
+#   tools/known-boards.txt    (committed)  CP2104 serial -> assembly label
+#   tools/fleet-secrets.ini   (gitignored) caster credentials + per-assembly secrets
 #
-# The WiFi SSID equals the board label (name the phone hotspot after the unit)
-# unless the board's section sets wifi_ssid. The BLE name also defaults to the
-# board label, unless the board's section sets ble_name.
+# The WiFi SSID equals the assembly label (name the phone hotspot after the unit)
+# unless the assembly's section sets wifi_ssid. The BLE name also defaults to the
+# assembly label, unless the assembly's section sets ble_name.
 # Result: one identity per unit: sticker, hotspot and BLE all match.
 # BLE names must be unique across the fleet and fit the scan response (max 29
 # bytes); both are checked here. An empty kBleName (placeholder builds) falls
-# back to the chip-id name at runtime (getDeviceName).
+# back to rtkrover-<chip-id> name at runtime (getDeviceName).
 #
-# Board selection, in order:
-#   1. RTK_BOARD env var (label or CP2104 serial) -- flash.sh exports this
-#   2. exactly one known unit attached over USB
+# Assembly selection, in order:
+#   1. RTK_BOARD env var (CP2104 serial): flash.sh exports this
+#   2. exactly one known ESP32 board attached over USB
 #   3. otherwise the previously generated header is kept as-is, so builds
 #      without hardware stay possible; a fresh clone gets an empty placeholder.
-# Incomplete secrets for the selected board are a hard error when the board
-# was requested explicitly or an upload is in the targets -- that image must
-# never be flashed with wrong credentials. A plain build with the board only
-# auto-detected falls back to the kept header instead.
+# Incomplete secrets for the selected assembly are a hard error when the board
+# was requested explicitly.
 import configparser
 import os
 import sys
@@ -76,8 +74,8 @@ def select_label(boards):
     if len(attached) == 1:
         return attached[0][1], None
     if len(attached) > 1:
-        return None, "multiple known units attached (set RTK_BOARD to pick one)"
-    return None, "no known unit attached and RTK_BOARD not set"
+        return None, "multiple known boards attached (set RTK_BOARD to pick one)"
+    return None, "no known board attached and RTK_BOARD not set"
 
 
 def c_escape(s):
@@ -180,9 +178,9 @@ def main():
         fail("%s has no [caster] section" % SECRETS_FILE)
 
     # Incomplete secrets for the selected board are fatal when the choice was
-    # explicit (RTK_BOARD) or the firmware is about to be flashed -- that image
-    # must never carry wrong credentials. For a plain build with the board
-    # merely auto-detected over USB, fall back like "no board selected".
+    # explicit (RTK_BOARD) or the firmware is about to be flashed.
+    # For a plain build with the board merely auto-detected over USB, fall back
+    # like "no board selected".
     explicit = bool(os.environ.get("RTK_BOARD", "").strip())
     strict = explicit or ("upload" in COMMAND_LINE_TARGETS)
 
@@ -214,7 +212,7 @@ def main():
         wifi_pw = ""
     wifi_ssid = board.get("wifi_ssid", label)
 
-    # BLE name: board label unless overridden.
+    # BLE name: assembly label unless overridden.
     # Validate fleet-wide (a duplicate makes two units indistinguishable).
     ble_names = {}
     for section in cfg.sections():

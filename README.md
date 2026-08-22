@@ -9,9 +9,9 @@ Hardware used:
 * Adafruit Feather ESP32 Huzzah
 * SparkFun GPS-RTK-SMA Breakout - ZED-F9P (Qwiic)
 * SparkFun BNO080 Breakout
-* ublox [ANN-MB1](https://www.u-blox.com/en/product/ann-mb-series?legacy=Current) antenna (the small one the picture is not used here at the moment)
+* Ardusimple [Compact Helical Tripleband GNSS Antenna
+](https://www.ardusimple.com/product/compact-helical-gnss-tripleband-l-band-antenna-ip67/)
 * LiPo battery
-* Push button(s)
 * Resistor 10 k
 * Switch
 
@@ -20,7 +20,16 @@ Infrastructure:
 * WiFi (e. g. a personal hotspot)
 * free line of sight between antenna (horizontal placed) an sky
 
-### Dependencies
+Naming Convention:
+
+Heaset "Assembly" = The headtracker, what you wear:
+headphones + microphone + ESP32 board + LiPo cell
++ BNO080 IMU breakout + ZED-F9P breakout + Antenna
+
+"Unit" = What you carry with you during the soundwalk:
+assembly + phone + accessories
+
+### Dependencies (currently not in use)
 
 * [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer)
 * [RTKRoverManager](https://github.com/jangleboom/RTKRoverManager)
@@ -47,11 +56,11 @@ more information in the [datasheet](https://www.ceva-dsp.com/wp-content/uploads/
 ZED-F9P:
 
 Caster and WiFi credentials live in `tools/fleet-secrets.ini` (gitignored; copy
-from `tools/fleet-secrets_example.ini`), keyed by the board labels from
+from `tools/fleet-secrets_example.ini`), keyed by the assembly labels from
 `tools/known-boards.txt`. At build time `tools/gen_caster_secrets.py` generates
-`src/CasterSecrets.h` from them for the selected unit — select it with the
+`src/CasterSecrets.h` from them for the selected assembly. Set it with the
 `RTK_BOARD` env var (label or CP2104 serial), or just have exactly one known
-unit attached. Do not edit the generated header by hand.
+board attached. Do not edit the generated header by hand.
 
 ```ini
 [caster]
@@ -65,9 +74,10 @@ caster_user = YOUR_CASTER_USER_01
 wifi_pw = HOTSPOT_PASSWORD_OF_UNIT_1
 ```
 
-The WiFi SSID equals the board label (name the phone hotspot after the unit);
-`wifi_ssid` in a board section overrides that. The BLE device name is derived
-from the chip ID at runtime and is not configured anywhere.
+The WiFi SSID equals the assembly label (name the phone hotspot after it);
+`wifi_ssid` in a assembly section overrides that. The BLE device name also
+equals the assenbly label, but falls back to a name derived from the chip ID
+if no corresponding assembly section exists in fleet-secrets.ini.
 
 The mklittlefs file in the root dir you have to [get](https://github.com/earlephilhower/mklittlefs/releases) depending on your OS.
 If you have the Arduino IDE installed, you can borrow it from there too. On macOS you can find it here: `~/Library/Arduino15/packages/esp32/tools/mklittlefs/3.0.0-gnu12-dc7f933/mklittlefs`.  Help for setup the file system you can find [here](https://randomnerdtutorials.com/esp8266-nodemcu-vs-code-platformio-littlefs/). This project was created on macOS (silicon).
