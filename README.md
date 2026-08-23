@@ -20,14 +20,22 @@ Infrastructure:
 * WiFi (e. g. a personal hotspot)
 * free line of sight between antenna (horizontal placed) an sky
 
-Naming Convention:
+Naming convention (the full glossary is PROJECT-PLAN.md §1.1):
 
-Heaset "Assembly" = The headtracker, what you wear:
-headphones + microphone + ESP32 board + LiPo cell
-+ BNO080 IMU breakout + ZED-F9P breakout + Antenna
-
-"Unit" = What you carry with you during the soundwalk:
-assembly + phone + accessories
+* **Headset assembly** (*assembly*) = the headtracker, what you wear:
+  headphones + microphone + ESP32 board + LiPo cell + BNO080 IMU breakout
+  + ZED-F9P breakout + antenna. This firmware makes it the **RTK headtracker**;
+  the sibling firmware RWAHT (`../rwa-headtracker`) makes a plain headtracker.
+  Its **assembly label** is its BLE name and its sticker, e.g. `rwa-hs-2`.
+* **Board** = the bare ESP32 Feather; only a flashing-time concept
+  (CP2104 serial ↔ assembly label in `tools/known-boards.txt`).
+* **Unit** = what you carry with you during the soundwalk: assembly + phone
+  + accessories. The **unit label** (`rwa-hs-N`) is the phone's name and
+  hotspot SSID and the `device_id` in telemetry; by convention it equals the
+  assembly label.
+* **Rover** is the RTK role of the GNSS receiver (corrected against the
+  refnet reference station), not a name for the hardware. It survives in
+  the firmware name *rtk-rover* only.
 
 ### Dependencies (currently not in use)
 
@@ -74,10 +82,10 @@ caster_user = YOUR_CASTER_USER_01
 wifi_pw = HOTSPOT_PASSWORD_OF_UNIT_1
 ```
 
-The WiFi SSID equals the assembly label (name the phone hotspot after it);
-`wifi_ssid` in a assembly section overrides that. The BLE device name also
-equals the assenbly label, but falls back to a name derived from the chip ID
-if no corresponding assembly section exists in fleet-secrets.ini.
+The WiFi SSID equals the assembly label (the unit's phone hotspot is named
+after it); `wifi_ssid` in an assembly section overrides that. The BLE name also
+equals the assembly label, but falls back to `rtkrover-<chip-id>` if no
+corresponding assembly section exists in fleet-secrets.ini.
 
 The mklittlefs file in the root dir you have to [get](https://github.com/earlephilhower/mklittlefs/releases) depending on your OS.
 If you have the Arduino IDE installed, you can borrow it from there too. On macOS you can find it here: `~/Library/Arduino15/packages/esp32/tools/mklittlefs/3.0.0-gnu12-dc7f933/mklittlefs`.  Help for setup the file system you can find [here](https://randomnerdtutorials.com/esp8266-nodemcu-vs-code-platformio-littlefs/). This project was created on macOS (silicon).

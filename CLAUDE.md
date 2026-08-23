@@ -4,7 +4,7 @@ ESP32 firmware for a head-mounted RTK GNSS + head-tracking unit, part of an audi
 augmented reality installation. Read `PROJECT-PLAN.md` (repo root) first, it defines
 the system architecture and the telemetry event schema (§4–5) that this firmware
 must implement. The schema is a cross-repo contract; do not change field names or
-semantics here without updating PROJECT-PLAN.md and the `rwa-client` decoder.
+semantics here without updating PROJECT-PLAN.md and the `rwa-player` decoder.
 
 ## Hardware
 
@@ -96,19 +96,23 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 2. `tools/fleet-secrets.ini` present (gitignored; copy from
    `tools/fleet-secrets_example.ini`) and a reachable WiFi/NTRIP caster.
    `src/CasterSecrets.h` is generated from it at build time by
-   `tools/gen_caster_secrets.py` (extra_script, like the fw-version header) —
-   never edit the header by hand. Per-unit facts are keyed by the board label
+   `tools/gen_caster_secrets.py` (extra_script, like the fw-version header).
+   Never edit the header by hand. Per-assembly facts are keyed by the assembly label
    from `tools/known-boards.txt`; each unit has its own caster username
-   (`musikbasel01`, `musikbasel02`, …). Board selection: `RTK_BOARD` (label or
+   (`musikbasel01`, `musikbasel02`, ...). Board selection: `RTK_BOARD` (label or
    serial; `flash.sh` exports its board argument), else the single attached
    unit. With neither, the previous header is kept (or an empty placeholder is
    written on a fresh clone) so hardware-less builds still work; a selected
    board with incomplete secrets fails the build on purpose.
-3. Mobile device with RWA Client running, provding the WiFi hotpot:
-   - Hotspot name = board label (e.g. `rwa-hs-2`), so the SSID needs no config
-     of its own. A `wifi_ssid` override per board section exists for hotspots
-     not yet renamed.
-   - Add `rtkrover-<esp32-slug>` as headtracker (BT) name in RWA Player, `<esp32-slug>` being the last 6 characters of the ESP32 serial number (i.e. `2d3810`)
+3. The unit's phone with RWA Player running, providing the WiFi hotspot:
+   - Hotspot name = unit label (e.g. `rwa-hs-2`, which is also the assembly's
+     BLE name), so the SSID needs no config of its own. A `wifi_ssid` override
+     per assembly section exists for hotspots not yet renamed.
+   - In RWA Player, Settings -> Unit ID = the unit label; the app connects to
+     the assembly advertising that name. Only an assembly without a
+     fleet-secrets entry advertises the fallback `rtkrover-<chip-id>` (last 6
+     hex digits of the ESP32 MAC, e.g. `rtkrover-2d3810`). Enter that under
+     Settings -> Headset assembly to connect to it.
 
 ## Conventions & constraints
 

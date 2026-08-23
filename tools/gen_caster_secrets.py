@@ -1,13 +1,14 @@
 # PlatformIO extra_script: generate src/CasterSecrets.h from the fleet files.
 #
-# Single source of truth for per-unit configuration:
+# Single source of truth for per-assembly configuration:
 #   tools/known-boards.txt    (committed)  CP2104 serial -> assembly label
 #   tools/fleet-secrets.ini   (gitignored) caster credentials + per-assembly secrets
 #
-# The WiFi SSID equals the assembly label (name the phone hotspot after the unit)
+# The WiFi SSID equals the assembly label (the unit's phone hotspot is named after it)
 # unless the assembly's section sets wifi_ssid. The BLE name also defaults to the
 # assembly label, unless the assembly's section sets ble_name.
-# Result: one identity per unit: sticker, hotspot and BLE all match.
+# Result: one identity per unit: sticker, hotspot and BLE all match
+# (glossary: PROJECT-PLAN.md 1.1).
 # BLE names must be unique across the fleet and fit the scan response (max 29
 # bytes); both are checked here. An empty kBleName (placeholder builds) falls
 # back to rtkrover-<chip-id> name at runtime (getDeviceName).
@@ -68,7 +69,7 @@ def select_label(boards):
             if want in (serial, label):
                 return label, None
         fail(
-            "RTK_BOARD='%s' is not a known unit in tools/known-boards.txt" % want
+            "RTK_BOARD='%s' is not a known board in tools/known-boards.txt" % want
         )
     attached = attached_boards(boards)
     if len(attached) == 1:
@@ -148,7 +149,7 @@ def keep_or_placeholder(reason):
     print(
         "gen_caster_secrets: WARNING: %s and no existing header; writing "
         "empty placeholder. This build cannot reach WiFi or the caster -- "
-        "set RTK_BOARD or attach a unit before flashing." % reason
+        "set RTK_BOARD or attach a board before flashing." % reason
     )
     names = [
         "kCasterHost", "kCasterPort", "kMountPoint", "kCasterUser",
@@ -213,7 +214,7 @@ def main():
     wifi_ssid = board.get("wifi_ssid", label)
 
     # BLE name: assembly label unless overridden.
-    # Validate fleet-wide (a duplicate makes two units indistinguishable).
+    # Validate fleet-wide (a duplicate makes two assemblies indistinguishable).
     ble_names = {}
     for section in cfg.sections():
         if section == "caster":

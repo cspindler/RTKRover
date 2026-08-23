@@ -10,8 +10,11 @@
 static uint8_t ringStorage[TELEMETRY_RING_SIZE];
 static TelemetryBuffer ringBuffer(ringStorage, sizeof(ringStorage));
 
-// Monotonic per boot; gaps after drops are fine (and diagnostic) — the
-// backend dedup key (device_id, session_id, seq) only needs uniqueness.
+// Monotonic per boot, restarts at 1 on every reset (no NVS/RTC persistence
+// on purpose: no flash writes on a brownout-prone supply). Gaps after drops
+// are fine and diagnostic. This is NOT a dedup key: the app maps it to
+// `dev_seq` on the JSON leg and assigns the backend `seq` itself
+// (PROJECT-PLAN.md 4.2).
 static std::atomic<uint32_t> seqCounter{0};
 
 // Encode-overflow drops (distinct from ring evictions, which TelemetryBuffer

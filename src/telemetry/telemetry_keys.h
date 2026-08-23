@@ -2,7 +2,7 @@
  * @file telemetry_keys.h
  * @brief CBOR key table for the BLE telemetry feed.
  *
- * CROSS-REPO CONTRACT (PROJECT-PLAN.md par. 5.3). Mirrored in rwa-client as
+ * CROSS-REPO CONTRACT (PROJECT-PLAN.md par. 5.3). Mirrored in rwa-player as
  * TelemetryKeys.swift. Never renumber or reuse a retired key within a type;
  * new fields get new keys, new event types get the next free type value.
  ******************************************************************************/

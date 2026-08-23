@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture a bounded window of serial output from the attached rover unit, then exit.
+# Capture a bounded window of serial output from the attached board, then exit.
 #
 # This is the half that genuinely needs wrapping: `pio device monitor` cannot run
 # without a TTY on stdin (pyserial miniterm calls termios.tcgetattr and aborts),

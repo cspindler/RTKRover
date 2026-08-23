@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and upload to the attached rover unit. Does not touch the serial monitor.
+# Build and upload to the attached board. Does not touch the serial monitor.
 #
 # Kept separate from tools/watch.sh so a failed upload and a failed capture
 # report distinct exit codes; chain them with && when you want both.
@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 ENV_NAME="${1:-featheresp32}"
 
 # Export the board choice so the build's gen_caster_secrets.py bakes the same
-# unit's credentials that find-board.sh resolves the port for.
+# assembly's credentials that find-board.sh resolves the port for.
 if [ -n "${2:-}" ]; then
   export RTK_BOARD="$2"
 fi

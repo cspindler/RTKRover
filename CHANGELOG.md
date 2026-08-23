@@ -9,6 +9,19 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- **Docs only: telemetry contract v3 (PROJECT-PLAN.md §1.1, §4.2, §5.3).** The
+  per-boot frame counter (CBOR key 1) is no longer a dedup key: the app maps it
+  to `dev_seq` on the JSON leg and assigns the backend `seq` itself, so a reboot
+  mid-session (counter restarts at 1, `t_dev_ms` restarts at 0) cannot collide
+  any more. Glossary adopted across repos: *headset assembly* (this firmware
+  makes it the *RTK headtracker*), *board* (bare Feather, flashing only),
+  *phone*, *unit* (assembly + phone, label `rwa-hs-N` = `device_id`); *rover*
+  names the RTK role of the receiver, not the hardware. Comments and tool
+  messages updated accordingly (`telemetry.cpp`, `telemetry_keys.h`,
+  `tools/*`, README, CLAUDE.md). No firmware behaviour or key-table change.
+
 ## [0.44.3] - 2026-08-20
 
 ### Fixed
