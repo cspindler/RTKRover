@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-08-25
+
 ### Added
 
 - **GNSS receiver watchdog + recovery ladder** (bench 4.1, 2026-08-24: the
@@ -28,13 +30,41 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ### Changed
 
+- The NTRIP socket is drained completely each iteration (buffer-sized slices,
+  16 KB backstop cap) instead of one 2 KB read: unread RTCM no longer piles
+  up in lwIP (the ~7 kB free-heap dips) and the caster no longer sees a zero
+  window from us.
+- `gnss_fix` is emitted only when the receiver delivered a fresh solution: the
+  stream now gaps during receiver stalls instead of repeating stale fixes
+  (PROJECT-PLAN §4.3 note). `heartbeat.ntrip_connected` is updated at every
+  connect/stop, not only at the loop top, so it can no longer report a stale
+  `true` through a stalled iteration.
+- The position-side `gnss_pipe_stall` probe measures the whole mutex-held
+  `updatePosition` body (the 2026-08-24 crawl was invisible to the
+  checkUblox-only probe).
+- moved `telemetryBleStartTask()` before sensor setup, so failures in
+  `setupGNSS()` and `setupBNO080()` become visible in diagnostics.
+
+- **Docs only: telemetry contract v3 (PROJECT-PLAN.md §1.1, §4.2, §5.3).** The
+  per-boot frame counter (CBOR key 1) is no longer a dedup key: the app maps it
+  to `dev_seq` on the JSON leg and assigns the backend `seq` itself, so a reboot
+  mid-session (counter restarts at 1, `t_dev_ms` restarts at 0) cannot collide
+  any more. Glossary adopted across repos: *headset assembly* (this firmware
+  makes it the *RTK headtracker*), *board* (bare Feather, flashing only),
+  *phone*, *unit* (assembly + phone, label `rwa-hs-N` = `device_id`); *rover*
+  names the RTK role of the receiver, not the hardware. Comments and tool
+  messages updated accordingly (`telemetry.cpp`, `telemetry_keys.h`,
+  `tools/*`, README, CLAUDE.md). No firmware behaviour or key-table change.
+
 - Navigation rate 20 -> 10 Hz (`NAVIGATION_FREQUENCY_HZ`): 20 Hz is beyond the
   F9P's multi-GNSS RTK spec (20 Hz is GPS-only) and the prime suspect for the
   receiver wedging into the slow-I2C / mute states of 2026-08-21/24. All
   consumers sample at <= 10 Hz (100 ms task intervals); halves I2C traffic and
   module CPU load.
+
 - `setI2CTransactionSize(128)` (library default 32; the library itself
   recommends 128 on ESP32): 4x fewer I2C start/stop cycles for the same data.
+
 - NMEA callback dispatch moved to the top of the NTRIP task loop so the GGA
   liveness clock ticks in every iteration, including receiver-silent ones.
 
@@ -73,34 +103,6 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
     cached reads. Previously every stale getter re-ran a hidden ~1 s
     checkUblox pass (up to ~13 per emit second) which was the actual
     12–26 s holder (invisible to the checkUblox-only probe).
-
-### Changed
-
-- The NTRIP socket is drained completely each iteration (buffer-sized slices,
-  16 KB backstop cap) instead of one 2 KB read: unread RTCM no longer piles
-  up in lwIP (the ~7 kB free-heap dips) and the caster no longer sees a zero
-  window from us.
-- `gnss_fix` is emitted only when the receiver delivered a fresh solution: the
-  stream now gaps during receiver stalls instead of repeating stale fixes
-  (PROJECT-PLAN §4.3 note). `heartbeat.ntrip_connected` is updated at every
-  connect/stop, not only at the loop top, so it can no longer report a stale
-  `true` through a stalled iteration.
-- The position-side `gnss_pipe_stall` probe measures the whole mutex-held
-  `updatePosition` body (the 2026-08-24 crawl was invisible to the
-  checkUblox-only probe).
-- moved `telemetryBleStartTask()` before sensor setup, so failures in
-  `setupGNSS()` and `setupBNO080()` become visible in diagnostics.
-
-- **Docs only: telemetry contract v3 (PROJECT-PLAN.md §1.1, §4.2, §5.3).** The
-  per-boot frame counter (CBOR key 1) is no longer a dedup key: the app maps it
-  to `dev_seq` on the JSON leg and assigns the backend `seq` itself, so a reboot
-  mid-session (counter restarts at 1, `t_dev_ms` restarts at 0) cannot collide
-  any more. Glossary adopted across repos: *headset assembly* (this firmware
-  makes it the *RTK headtracker*), *board* (bare Feather, flashing only),
-  *phone*, *unit* (assembly + phone, label `rwa-hs-N` = `device_id`); *rover*
-  names the RTK role of the receiver, not the hardware. Comments and tool
-  messages updated accordingly (`telemetry.cpp`, `telemetry_keys.h`,
-  `tools/*`, README, CLAUDE.md). No firmware behaviour or key-table change.
 
 ## [0.44.3] - 2026-08-20
 
