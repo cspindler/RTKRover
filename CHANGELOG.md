@@ -11,6 +11,9 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ### Changed
 
+- moved `telemetryBleStartTask()` before sensor setup, so failures in
+  `setupGNSS()` and `setupBNO080()` become visible in diagnostics.
+
 - **Docs only: telemetry contract v3 (PROJECT-PLAN.md §1.1, §4.2, §5.3).** The
   per-boot frame counter (CBOR key 1) is no longer a dedup key: the app maps it
   to `dev_seq` on the JSON leg and assigns the backend `seq` itself, so a reboot

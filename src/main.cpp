@@ -343,6 +343,15 @@ void setup()
 
   setupBLE();
 
+  // Telemetry drain: lowest priority in the system (PROJECT-PLAN.md par. 5).
+  // Started BEFORE the blocking sensor setups on purpose: setupGNSS()/
+  // setupBNO080() retry forever when a sensor doesn't answer, and with the
+  // drain not yet running the assembly would sit BLE-connected but mute.
+  // The i2c_* error events waiting in the ring, never delivered (observed
+  // 2026-08-24, rwa-hs-4: F9P not ACKing, app received no telemetry at all).
+  // The task needs only the ring, BLE and battery/WiFi reads.
+  telemetryBleStartTask();
+
   setupGNSS();
 
   DBG.print(F("Device type: ")); DBG.println(DEVICE_TYPE);
@@ -379,8 +388,8 @@ void setup()
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, &hTaskBnoBle, RUNNING_CORE_1);
   xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, &hTaskRtkBle, RUNNING_CORE_1);
 
-  // Telemetry drain: lowest priority in the system (PROJECT-PLAN.md par. 5)
-  telemetryBleStartTask();
+  // (Telemetry drain task is started right after setupBLE() above, so sensor
+  // failures during setup are already visible in diagnostics.)
 
   String thisBoard = ARDUINO_BOARD;
   DBG.print(F("Setup done on "));
