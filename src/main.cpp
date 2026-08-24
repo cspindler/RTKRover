@@ -539,7 +539,7 @@ bool setupGNSS()
       if (!busFailEmitted)
       {
         busFailEmitted = true;
-        telemetryEmitError(2, "i2c_bus_rtk_failed", "Wire1.begin() failing, check cable");
+        telemetryEmitError(3, "i2c_bus_rtk_failed", "Wire1.begin() failing, check cable");
       }
       delay(500);
     }
@@ -1410,7 +1410,7 @@ void setupBNO080()
     if (!beginFailEmitted)
     {
       beginFailEmitted = true;
-      telemetryEmitError(2, "i2c_bno080_not_detected", "BNO080 begin() failing, check wiring");
+      telemetryEmitError(3, "i2c_bno080_not_detected", "BNO080 begin() failing, check wiring");
     }
     delay(500);
   }
