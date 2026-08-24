@@ -204,7 +204,7 @@ receiver-degraded signature.
 | `carr_soln` | uint8 | 0 = none, 1 = RTK float, 2 = RTK fixed |
 | `h_acc_mm`, `v_acc_mm` | uint32 | u-blox accuracy estimates |
 | `num_sv` | uint8 | satellites used |
-| `pdop` | float | |
+| `pdop` | float | position dilution of precision |
 | `corr_age_ms` | uint32 | age of last RTCM correction applied; 0xFFFFFFFF = never |
 
 App-created fixes (`source` = `phone` from CoreLocation, `creator` from the simulator) carry
