@@ -51,6 +51,17 @@ static void drainTelemetry()
   while (telemetryPopFrame(scratch, sizeof(scratch)) > 0) {}
 }
 
+static bool containsBytes(const uint8_t *hay, size_t hayLen,
+                          const uint8_t *needle, size_t needleLen)
+{
+  if (needleLen > hayLen) return false;
+  for (size_t i = 0; i + needleLen <= hayLen; i++)
+  {
+    if (memcmp(hay + i, needle, needleLen) == 0) return true;
+  }
+  return false;
+}
+
 // --- CBOR encoder ----------------------------------------------------------
 
 test(cbor_uint_boundaries)
@@ -274,7 +285,7 @@ test(frame_seq_increments)
 test(frame_heartbeat_carries_fw_version)
 {
   drainTelemetry();
-  assertTrue(telemetryEmitHeartbeat(123456, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -296,7 +307,7 @@ test(frame_heartbeat_carries_fw_version)
 test(frame_heartbeat_carries_batt_mv)
 {
   drainTelemetry();
-  assertTrue(telemetryEmitHeartbeat(123456, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -306,6 +317,41 @@ test(frame_heartbeat_carries_batt_mv)
   const uint8_t want[] = {TELEM_HB_BATT_MV, 0x19, 0x0F, 0x3C};
   assertTrue(bytesEqual(frame + n - sizeof(want), sizeof(want), want,
                         sizeof(want)));
+}
+
+test(frame_heartbeat_carries_heap_min_and_loop_counters)
+{
+  // First heartbeat resets the loop counters (read-and-reset), then discard it.
+  telemetryEmitHeartbeat(123456, 9876, -60, true, 3900);
+  drainTelemetry();
+
+  telemetryNoteNtripLoop();
+  telemetryNoteNtripLoop();
+  telemetryNoteNtripLoop();
+  telemetryNotePositionLoop();
+  telemetryNotePositionLoop();
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+
+  uint8_t frame[TELEMETRY_MAX_FRAME];
+  size_t n = telemetryPopFrame(frame, sizeof(frame));
+  assertMore(n, (size_t)4);
+
+  // heap_min: key 17, 9876 = 0x2694 as a 2-byte uint
+  const uint8_t wantHeapMin[] = {TELEM_HB_HEAP_MIN, 0x19, 0x26, 0x94};
+  assertTrue(containsBytes(frame, n, wantHeapMin, sizeof(wantHeapMin)));
+
+  // Adjacent pairs: loops_ntrip (key 18) = 3, loops_pos (key 19) = 2
+  const uint8_t wantLoops[] = {TELEM_HB_LOOPS_NTRIP, 0x03,
+                               TELEM_HB_LOOPS_POS, 0x02};
+  assertTrue(containsBytes(frame, n, wantLoops, sizeof(wantLoops)));
+
+  // Read-and-reset: the next heartbeat reports zeros.
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+  n = telemetryPopFrame(frame, sizeof(frame));
+  assertMore(n, (size_t)4);
+  const uint8_t wantZeros[] = {TELEM_HB_LOOPS_NTRIP, 0x00,
+                               TELEM_HB_LOOPS_POS, 0x00};
+  assertTrue(containsBytes(frame, n, wantZeros, sizeof(wantZeros)));
 }
 
 test(frame_error_msg_capped)

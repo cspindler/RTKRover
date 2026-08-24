@@ -502,7 +502,24 @@ void updatePosition()
 {
   coord_t coord;
 
+  // gnss_pipe_stall instrumentation: checkUblox is the suspected long holder
+  // of mutexSem in the 2026-08-21 field slowdown (one position-task iteration
+  // per ~15 s). Measure every call; a slow one becomes a sev-1 error event
+  // naming the duration, so the next episode is diagnosable from Grafana.
+  uint32_t ubxStart_ms = millis();
   myGNSS.checkUblox();
+  uint32_t ubxMs = millis() - ubxStart_ms;
+  if (ubxMs > GNSS_PIPE_STALL_MS)
+  {
+    static uint32_t lastStallEmit_ms = 0;
+    if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
+    {
+      lastStallEmit_ms = millis();
+      char msg[48];
+      snprintf(msg, sizeof(msg), "checkUblox(pos) took %u ms", (unsigned)ubxMs);
+      telemetryEmitError(1, "gnss_pipe_stall", msg);
+    }
+  }
 
   int32_t lat = myGNSS.getHighResLatitude();
   int8_t latHp = myGNSS.getHighResLatitudeHp();
@@ -579,6 +596,8 @@ void task_rtk_get_rover_position(void *pvParameters)
 
   while (true)
   {
+    telemetryNotePositionLoop();  // heartbeat liveness counter (key 19)
+
     if (xSemaphoreTake(mutexSem, portMAX_DELAY))
     {
       updatePosition();
@@ -646,6 +665,14 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
   while (true) // Task loop begins
   {
+    telemetryNoteNtripLoop();  // heartbeat liveness counter (key 18)
+
+    // gnss_pipe_stall instrumentation: phase timers for this iteration.
+    // Whatever exceeds GNSS_PIPE_STALL_MS in one pass is emitted as a sev-1
+    // error at the bottom of the loop (2026-08-21 slowdown diagnosis).
+    uint32_t iterStart_ms = millis();
+    uint32_t mutexWaitMs = 0, ubxMs = 0, pushMs = 0, ggaMs = 0;
+
     // Mirror the link state for the telemetry heartbeat
     bool nowConnected = ntripClient.connected();
     telemetrySetNtripConnected(nowConnected);
@@ -683,6 +710,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         blinkOneTime(100, false);
       }
       wifiLossEmitted = false;
+      // A WiFi outage is reported by wifi_disconnected, not gnss_pipe_stall:
+      // restart the iteration clock so outage time doesn't count as a stall.
+      iterStart_ms = millis();
 
       if (successfulConnects > 0 && !reconnectingEmitted)
       {
@@ -877,9 +907,13 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           // the mutex: it touches no I2C, and it invokes callbackGPGGA,
           // which takes mutexSem itself (non-recursive - taking it here
           // would self-deadlock this task and starve positioning).
+          uint32_t phase_ms = millis();
           if (xSemaphoreTake(mutexSem, portMAX_DELAY))
           {
+            mutexWaitMs += millis() - phase_ms;
+            phase_ms = millis();
             myGNSS.checkUblox();
+            ubxMs += millis() - phase_ms;
             xSemaphoreGive(mutexSem);
           }
           myGNSS.checkCallbacks();
@@ -903,9 +937,13 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (rtcmCount > 0)
       {
         //Push RTCM to GNSS module over I2C
+        uint32_t phase_ms = millis();
         if (xSemaphoreTake(mutexSem, portMAX_DELAY))
         {
+          mutexWaitMs += millis() - phase_ms;
+          phase_ms = millis();
           myGNSS.pushRawData(rtcmData, rtcmCount, false);
+          pushMs += millis() - phase_ms;
           beginPositioning = true;
           telemetryNoteRtcmPushed(rtcmCount);  // feeds corr_age_ms + bytes_rx
           xSemaphoreGive(mutexSem);
@@ -932,8 +970,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       char localGgaSentence[NMEA_GGA_MAX_LENGTH] = {0};
       bool shouldSendGga = false;
 
+      uint32_t phase_ms = millis();
       if (xSemaphoreTake(mutexSem, portMAX_DELAY))
       {
+        mutexWaitMs += millis() - phase_ms;
         if (ggaSentenceComplete == true)
         {
           strncpy(localGgaSentence, ggaSentence, NMEA_GGA_MAX_LENGTH - 1);
@@ -953,8 +993,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(localGgaSentence);
 
         //Push our current GGA sentence to caster
+        phase_ms = millis();
         ntripClient.print(localGgaSentence);
         ntripClient.print("\r\n");
+        ggaMs += millis() - phase_ms;
       }
     }
 
@@ -976,6 +1018,26 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     // DBG.print(F("task_rtk_get_corrrection_data loop, uxHighWaterMark: "));
     // DBG.println(uxHighWaterMark);
     // } /*** End if (xSemaphoreTake(mutexSem, portMAX_DELAY)) ***/
+
+    // gnss_pipe_stall: a whole iteration over threshold gets reported with
+    // its phase breakdown (any remainder beyond the four phases is connect /
+    // response-wait time). Iterations that `continue` above skip this on
+    // purpose: their delays are deliberate retry pacing.
+    uint32_t iterMs = millis() - iterStart_ms;
+    if (iterMs > GNSS_PIPE_STALL_MS)
+    {
+      static uint32_t lastStallEmit_ms = 0;
+      if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
+      {
+        lastStallEmit_ms = millis();
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "ntrip iter %u ms (mutex %u, ubx %u, push %u, gga %u)",
+                 (unsigned)iterMs, (unsigned)mutexWaitMs, (unsigned)ubxMs,
+                 (unsigned)pushMs, (unsigned)ggaMs);
+        telemetryEmitError(1, "gnss_pipe_stall", msg);
+      }
+    }
 
     // Wait a bit before the next request will be started
     vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);

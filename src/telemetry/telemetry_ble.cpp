@@ -142,7 +142,8 @@ static void telemetryDrainTask(void *pvParameters)
       lastHeartbeat = millis();
       // ADC1 read: microseconds, and unaffected by WiFi (see src/battery.h).
       uint32_t battMv = batteryMilliVolts();
-      telemetryEmitHeartbeat(esp_get_free_heap_size(), WiFi.RSSI(),
+      telemetryEmitHeartbeat(esp_get_free_heap_size(),
+                             esp_get_minimum_free_heap_size(), WiFi.RSSI(),
                              telemetryNtripConnected(), battMv);
       DBG.printf("telemetry: heartbeat%s, seq %u, dropped %u, batt %u mV\n",
                  dump ? " (status dump)" : "", telemetrySeqNow(),

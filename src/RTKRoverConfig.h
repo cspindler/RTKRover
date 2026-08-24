@@ -35,6 +35,14 @@
                                             // drain can never crowd the
                                             // headtracker notifications
 #define TELEMETRY_HEARTBEAT_MS        15000 // PROJECT-PLAN.md par. 4.3
+#define GNSS_PIPE_STALL_MS            5000  // gnss_pipe_stall event: a pipeline
+                                            // step (position-task checkUblox, or
+                                            // one NTRIP-task iteration) exceeding
+                                            // this emits a sev-1 error naming the
+                                            // phase (2026-08-21 slowdown diagnosis)
+#define GNSS_PIPE_STALL_GAP_MS        10000 // min spacing between stall events
+                                            // per emit site (don't flood the ring
+                                            // during a long episode)
 #define TELEMETRY_NOTIFY_BUF          247   // upper bound for one notification
                                             // payload; effective cap is the
                                             // negotiated MTU-3 (iOS: ~182)

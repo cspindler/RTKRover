@@ -221,6 +221,8 @@ assembly; absent for `phone`).
 | `ntrip_connected` | bool |
 | `fw_version` | redundant with envelope, but lets the backend detect mismatches. Cut off after 32 bytes on the BLE leg — enough for semver plus git hash |
 | `dropped_frames` | cumulative count of telemetry frames dropped on-device (ring-buffer overflow); resets on boot |
+| `heap_min` | lowest free heap since boot (bytes). Together with `free_heap` it bounds the between-heartbeat transients that point samples miss (added for the 2026-08-21 underrun diagnosis) |
+| `loops_ntrip`, `loops_pos` | NTRIP-task / position-task loop iterations completed since the previous heartbeat (healthy: ~15 / ~150 per 15 s). A collapse toward 1 is the GNSS-pipeline-slowdown signature (see the `gnss_pipe_stall` error) |
 | `batt_mv` | LiPo pack voltage in mV, read from the Feather's 2:1 divider on A13 (ADC1, unaffected by WiFi). Single-cell: ~4200 full, ~3300 empty. 0 = unknown. Consumers derive a percentage; the firmware ships no discharge curve |
 
 **`heartbeat`** (app, `source` = `phone`): every 15 s from RWA Player: `uptime_ms` (app),
@@ -248,6 +250,7 @@ The codes are part of the contract (they will be alert labels). What the firmwar
 | `ntrip_rtcm_timeout` | 1 | no corrections for 10 s, dropping the caster connection |
 | `ntrip_bad_response` | 2 | caster answered, but not with a correction stream (`msg` carries the reply) |
 | `ntrip_request_overflow` | 2 | the request to the caster did not fit its buffer: a config mistake, not a field fault |
+| `gnss_pipe_stall` | 1 | a GNSS-pipeline step ran over threshold (5 s): one NTRIP-task iteration (`msg` carries the mutex/checkUblox/push/GGA phase breakdown) or one position-task `checkUblox`. Diagnosis instrumentation for the 2026-08-21 slowdown; rate-limited to one per 10 s per site |
 | `i2c_bus_rtk_failed` | 2 | the sensor bus would not start |
 | `i2c_bno080_not_detected` | 2 | head-tracking IMU not answering |
 | `i2c_gnss_not_detected` | 3 | GNSS receiver not answering: the assembly is useless without it |
@@ -358,6 +361,9 @@ Type-specific keys start at 10 (`type` disambiguates, so numbers repeat across t
 | | 14 | `fw_version` | text (≤ 32 B) |
 | | 15 | `dropped_frames` | uint |
 | | 16 | `batt_mv` | uint |
+| | 17 | `heap_min` | uint |
+| | 18 | `loops_ntrip` | uint |
+| | 19 | `loops_pos` | uint |
 | `ntrip_status` | 10 | `state` | uint: 0 = disconnected, 1 = connected, 2 = reconnecting |
 | | 11 | `reconnects` | uint |
 | | 12 | `bytes_rx` | uint |

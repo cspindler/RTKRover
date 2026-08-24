@@ -53,6 +53,9 @@ enum TelemetryHeartbeatKey : uint8_t {
   TELEM_HB_FW_VERSION      = 14,  // text
   TELEM_HB_DROPPED_FRAMES  = 15,  // uint, cumulative since boot
   TELEM_HB_BATT_MV         = 16,  // uint, LiPo pack millivolts (0 = unknown)
+  TELEM_HB_HEAP_MIN        = 17,  // uint, lowest free heap since boot
+  TELEM_HB_LOOPS_NTRIP     = 18,  // uint, NTRIP-task loop iterations since last heartbeat
+  TELEM_HB_LOOPS_POS       = 19,  // uint, position-task loop iterations since last heartbeat
 };
 
 // ntrip_status (type 3)

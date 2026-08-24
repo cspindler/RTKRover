@@ -89,14 +89,31 @@ bool telemetryEmitGnssFix(const TelemetryGnssFix &fix)
   return b.commit();
 }
 
-bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected,
-                            uint32_t battMv)
+// Pipeline liveness counters (heartbeat keys 18/19). Incremented from the
+// NTRIP / position task loop tops, read-and-reset by the heartbeat emitter.
+static std::atomic<uint32_t> ntripLoops{0};
+static std::atomic<uint32_t> positionLoops{0};
+
+void telemetryNoteNtripLoop()
 {
-  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 7);
+  ntripLoops.fetch_add(1, std::memory_order_relaxed);
+}
+
+void telemetryNotePositionLoop()
+{
+  positionLoops.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, int wifiRssi,
+                            bool ntripConnected, uint32_t battMv)
+{
+  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 10);
   b.w.key(TELEM_HB_UPTIME_MS);
   b.w.uintVal(millis());
   b.w.key(TELEM_HB_FREE_HEAP);
   b.w.uintVal(freeHeap);
+  b.w.key(TELEM_HB_HEAP_MIN);
+  b.w.uintVal(heapMin);
   b.w.key(TELEM_HB_WIFI_RSSI);
   b.w.intVal(wifiRssi);
   b.w.key(TELEM_HB_NTRIP_CONNECTED);
@@ -105,6 +122,11 @@ bool telemetryEmitHeartbeat(uint32_t freeHeap, int wifiRssi, bool ntripConnected
   b.w.textVal(FW_VERSION, 32);
   b.w.key(TELEM_HB_DROPPED_FRAMES);
   b.w.uintVal(telemetryDroppedFrames());
+  b.w.key(TELEM_HB_LOOPS_NTRIP);
+  b.w.uintVal(ntripLoops.exchange(0, std::memory_order_relaxed));
+  b.w.key(TELEM_HB_LOOPS_POS);
+  b.w.uintVal(positionLoops.exchange(0, std::memory_order_relaxed));
+  // batt_mv stays the last pair: frame_heartbeat_carries_batt_mv asserts it.
   b.w.key(TELEM_HB_BATT_MV);
   b.w.uintVal(battMv);
   return b.commit();
