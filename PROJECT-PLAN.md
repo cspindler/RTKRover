@@ -37,9 +37,9 @@ the "retired" column lists what they replace.
 
 | Term | Meaning | Identity / notes | Retired words |
 | --- | --- | --- | --- |
-| **Headset assembly** (short: *assembly*) | What the visitor wears: headphones + microphone + ESP32 board + LiPo cell + BNO080 IMU, plus ZED-F9P receiver and antenna in the RTK variant. Two kinds: the **RTK headtracker** (firmware rtk-rover; positioning, heading and diagnostics telemetry) and the plain **headtracker** (firmware RWAHT; heading only). | **Assembly label** = the BLE advertised name = the sticker. RTK: assigned at build time from `tools/fleet-secrets.ini` (`ble_name`, defaulting to the section name, e.g. `rwa-hs-2`); assemblies without a fleet entry fall back to `rtkrover-<chip-id>`. RWAHT: `rwahtNN`. | "headset", "tracker", "rover" (for the hardware), "device" (for the ESP32) |
+| **Headset assembly** (short: *assembly*) | What the visitor wears: headphones + microphone + ESP32 board + LiPo cell + BNO080 IMU, plus ZED-F9P receiver and antenna in the RTK variant. Two kinds: the **RTK headtracker** (firmware rtk-rover; positioning, heading and diagnostics telemetry) and the plain **headtracker** (firmware RWAHT; heading only). | **Assembly label** = the BLE advertised name = the sticker.<br>RTK variant: assigned at build time from `tools/fleet-secrets.ini` (`ble_name`, defaulting to the section name, e.g. `rwa-hs-2`); assemblies without a fleet entry fall back to `rtkrover-<chip-id>`.<br>RWAHT variant: `rwahtNN`. | "headset", "tracker", "rover" (for the hardware), "device" (for the ESP32) |
 | **Rover** | The RTK *role* of the GNSS receiver in the assembly: the mobile receiver whose position is corrected against a fixed base/reference station (the refnet NTRIP caster). Names a function, not hardware. | Lives on in the firmware/repo name *rtk-rover* and in GNSS prose only. | — |
-| **Board** | The bare ESP32 Feather. Exists only at flashing time. | CP2104 serial / chip id, mapped to the assembly label in `tools/known-boards.txt`. | "board label" (→ assembly label), "unit" for the bare board |
+| **Board** | The bare ESP32 Feather. | CP2104 serial / chip id, mapped to the assembly label in `tools/known-boards.txt`. | "board label" (→ assembly label), "unit" for the bare board |
 | **Phone** | The iPhone running **RWA Player** (the *app*); the telemetry gateway. | Named after its unit, and its personal hotspot SSID is the unit label. Both are conventions applied by hand at provisioning time: iOS does not let the app read the phone's name, so the unit label is typed into Settings or provisioned. | — |
 | **Unit** | Assembly + phone + accessories: what is handed to a visitor. | **Unit label** `rwa-hs-N`. This is `device_id` on the wire (field name kept for backend compatibility; "device" in SQL and backend prose means the unit). By convention unit label == the unit's assembly label == hotspot SSID. | `hs-03`-style ids, "rwa-phone-N" |
 | **Session** | One process launch of RWA Player. | `session_id` (UUID), minted at launch. Not rotated on BLE (re)connect. | — |
@@ -48,10 +48,10 @@ the "retired" column lists what they replace.
 | **dev_seq** | The RTK headtracker's own frame counter (CBOR key 1): per boot, assigned when the firmware *creates* the event. A gap/loss diagnostic, never a key. | Only on events created by the firmware. | `seq` as the device counter |
 | **t_dev_ms** | `millis()` on the assembly when the firmware *created* the event; per boot. | Only on events created by the firmware. | — |
 
-Phone-side identity settings (Settings ▸ Identity, `player-settings.plist` provisioning):
+Phone-side identity settings (Settings -> Identity, `player-settings.plist` provisioning):
 
-- **Unit ID** (`unitId`) — required. Becomes `device_id`.
-- **Headset assembly** (`assemblyId`) — optional override of the BLE name to connect to. When
+- **Unit ID** (`unitId`): required. Becomes `device_id`.
+- **Headset assembly** (`assemblyId`): optional override of the BLE name to connect to. When
   empty, the app connects to the assembly advertising the unit label. Set it only when a phone
   runs with an assembly that is not its unit's own (a spare `rwa-hs-7`, or an RWAHT `rwaht01`).
 - Telemetry reports `assembly_id` = the advertised name of the assembly *actually connected*, so
@@ -183,8 +183,12 @@ for each type; "firmware" cells are created on the RTK headtracker and carry
 | `ntrip_status`, `imu_status`, `error` | firmware | - | - | - |
 | `app_event` | - | - | app | - |
 
-There is exactly one `gnss_fix` stream per source: for the RTK headtracker the firmware record
-is the fix; the app does not build its own copy from the text protocol.
+There is exactly one `gnss_fix` stream per source: for the RTK headtracker the
+firmware record is the fix; the app does not build its own copy from the text
+protocol. The `phone` stream (CoreLocation) is continuous (even while the RTK
+headtracker drives the hero), so the two positioning systems can be compared
+over the same walk; `source` separates them. Which source *drives the hero* is a
+separate statement, reported as `position_source` in the app heartbeat.
 
 **`gnss_fix`**: emitted at 1 Hz from UBX-NAV-PVT (+ correction-age from RXM-COR/RTCM bookkeeping).
 This is the dead-zone dataset; do not thin it out.
