@@ -177,6 +177,17 @@ the post-connect grace window, reconnect backoff, and bounded mutex takes.
                                            // timeout skip the I2C work, keep the link
 #define GGA_MUTEX_TIMEOUT_MS          250  // GGA copy/callback takes: a fresh GGA
                                            // arrives every epoch, skipping one is free
+
+// WiFi outage handling (bench 2+4, 2026-08-24): a full setupStationMode()
+// per retry (driver deinit/init every ~12 s) leaked ~48 B/cycle = ~14.5 kB/h
+// and transiently dipped free heap by several kB per cycle — OOM after ~1 h
+// of continuous hotspot loss. The wait loop now nudges with WiFi.reconnect()
+// (no teardown; auto-reconnect keeps retrying between nudges) and escalates
+// to one full re-init only after minutes without success.
+#define WIFI_RECONNECT_NUDGE_MS     10000  // soft WiFi.reconnect() kick cadence
+#define WIFI_REINIT_AFTER_MS       300000  // full driver re-init only after this
+                                           // long without association (wedged-
+                                           // driver escape hatch)
 /*
 The module supports RTK update frequencies ranging from 8 Hz (BeiDou, Galileo, GLONASS, GPS) to
 20 Hz (GPS only), velocity and dynamic heading accuracies of 0.05 m/s and 0.3° respectively and a

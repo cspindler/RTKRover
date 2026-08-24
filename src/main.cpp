@@ -329,13 +329,30 @@ void setup()
   blinkOneTime(125, true);
   blinkOneTime(125, true);
 
+  // Same soft-retry pattern as the NTRIP task's outage loop (see there):
+  // auto-reconnect plus periodic WiFi.reconnect() nudges; the full driver
+  // re-init only as a rare escape hatch. A unit powered on before its phone
+  // hotspot exists sits in this loop — with a teardown per retry it leaked
+  // ~14.5 kB/h here too (bench 2+4, 2026-08-24).
+  uint32_t bootWifiDown_ms = millis();
+  uint32_t bootLastNudge_ms = millis();
   while (!WiFi.isConnected())
   {
     DBG.println(F("setup(): Not connected to WiFi station"));
     DBG.printf("WiFi state: %d", WiFi.status());
     blinkOneTime(1000, false);
     blinkOneTime(100, false);
-    setupWiFi();
+    if (millis() - bootWifiDown_ms >= WIFI_REINIT_AFTER_MS)
+    {
+      bootWifiDown_ms = millis();
+      bootLastNudge_ms = millis();
+      setupWiFi();
+    }
+    else if (millis() - bootLastNudge_ms >= WIFI_RECONNECT_NUDGE_MS)
+    {
+      bootLastNudge_ms = millis();
+      WiFi.reconnect();
+    }
   }
 
   DBG.print(F("BLE Device name: "));
@@ -734,7 +751,17 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
     if (ntripClient.connected() == false)
     {
-      // First check WiFi connection
+      // First check WiFi connection. Wait SOFTLY: auto-reconnect is on, so
+      // the driver keeps retrying by itself; every WIFI_RECONNECT_NUDGE_MS
+      // we kick it with WiFi.reconnect() (plain disconnect+connect, no
+      // teardown). The previous full setupStationMode() per retry cycled a
+      // complete driver deinit/init every ~12 s, which leaked ~48 B/cycle
+      // (-14.5 kB/h, measured bench 2+4 2026-08-24: OOM after ~1 h of
+      // continuous hotspot loss) and transiently dipped free heap by
+      // several kB per cycle. It remains only as a rare escape hatch for a
+      // wedged driver, after WIFI_REINIT_AFTER_MS without association.
+      uint32_t wifiDown_ms = millis();
+      uint32_t lastNudge_ms = millis();
       while (!WiFi.isConnected())
       {
         DBG.println(F("task_rtk_get_corr_data loop: Not connected to WiFi station"));
@@ -745,7 +772,19 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           wifiLossEmitted = true;
           telemetryEmitError(1, "wifi_disconnected", "hotspot lost, reconnecting");
         }
-        setupStationMode(kWifiSsid, kWifiPw);
+        if (millis() - wifiDown_ms >= WIFI_REINIT_AFTER_MS)
+        {
+          wifiDown_ms = millis();
+          lastNudge_ms = millis();
+          DBG.println(F("WiFi down for minutes, full driver re-init"));
+          setupStationMode(kWifiSsid, kWifiPw);
+        }
+        else if (millis() - lastNudge_ms >= WIFI_RECONNECT_NUDGE_MS)
+        {
+          lastNudge_ms = millis();
+          DBG.println(F("WiFi soft reconnect nudge"));
+          WiFi.reconnect();
+        }
         blinkOneTime(1000, false);
         blinkOneTime(100, false);
       }

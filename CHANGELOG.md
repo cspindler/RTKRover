@@ -11,6 +11,17 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ### Fixed
 
+- **Heap leak during WiFi outages** (bench captures 2026-08-24: −4 B/s ≈
+  −14.5 kB/h, linear, plus several-kB transient dips per cycle, meaning OOM after
+  ~1 h of continuous hotspot loss): both WiFi wait loops (boot in `setup()`,
+  outage in the NTRIP task) ran a full `setupStationMode()` per ~12 s retry,
+  i.e. a complete WiFi driver deinit/init cycle each time, which arduino-esp32
+  2.0.x leaks on. The loops now wait softly: auto-reconnect keeps retrying,
+  kicked by a `WiFi.reconnect()` nudge every 10 s (plain disconnect+connect,
+  no teardown; `WIFI_RECONNECT_NUDGE_MS`), and escalate to one full driver
+  re-init only after 5 min without association (`WIFI_REINIT_AFTER_MS`,
+  wedged-driver escape hatch).
+
 - **NTRIP death spiral under a degraded receiver** (field captures 2026-08-21
   and 2026-08-24): when the ZED-F9P entered a slow-I2C state, the position task
   held `mutexSem` 12–26 s per pass, the NTRIP task's `portMAX_DELAY` takes
