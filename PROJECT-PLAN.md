@@ -191,7 +191,10 @@ over the same walk; `source` separates them. Which source *drives the hero* is a
 separate statement, reported as `position_source` in the app heartbeat.
 
 **`gnss_fix`**: emitted at 1 Hz from UBX-NAV-PVT (+ correction-age from RXM-COR/RTCM bookkeeping).
-This is the dead-zone dataset; do not thin it out.
+This is the dead-zone dataset; do not thin it out. Emitted only when the receiver delivered a
+fresh solution: when its output stalls the stream gaps rather than repeating stale fixes.
+A gap here plus a `gnss_pipe_stall` error and a collapsed heartbeat `loops_pos` is the
+receiver-degraded signature.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -250,7 +253,7 @@ The codes are part of the contract (they will be alert labels). What the firmwar
 | `ntrip_rtcm_timeout` | 1 | no corrections for 10 s, dropping the caster connection |
 | `ntrip_bad_response` | 2 | caster answered, but not with a correction stream (`msg` carries the reply) |
 | `ntrip_request_overflow` | 2 | the request to the caster did not fit its buffer: a config mistake, not a field fault |
-| `gnss_pipe_stall` | 1 | a GNSS-pipeline step ran over threshold (5 s): one NTRIP-task iteration (`msg` carries the mutex/checkUblox/push/GGA phase breakdown) or one position-task `checkUblox`. Diagnosis instrumentation for the 2026-08-21 slowdown; rate-limited to one per 10 s per site |
+| `gnss_pipe_stall` | 1 | a GNSS-pipeline step ran over threshold (5 s): one NTRIP-task iteration (`msg` carries the mutex/checkUblox/push/GGA phase breakdown; the remainder is connect/response time) or one position-task `updatePosition` mutex hold. Diagnosis instrumentation for the 2026-08 slowdowns; rate-limited to one per 10 s per site |
 | `i2c_bus_rtk_failed` | 2 | the sensor bus would not start |
 | `i2c_bno080_not_detected` | 2 | head-tracking IMU not answering |
 | `i2c_gnss_not_detected` | 3 | GNSS receiver not answering: the assembly is useless without it |

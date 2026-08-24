@@ -155,6 +155,28 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define MIN_ACCEPTABLE_ACCURACY_MM                   8000  // Device will only send if accuray is better than this
 #define NAVIGATION_FREQUENCY_HZ                        20    // Set solution output to x times a second
 #define CONNECTION_TIMEOUT_MS                       10000
+
+/*
+=================================================================================
+                          NTRIP link management (2026-08-24)
+=================================================================================
+Field capture 2026-08-24: the fixed 10 s no-RTCM hangup killed every fresh
+session while the NTRIP task sat 12-26 s in portMAX_DELAY mutex waits, and the
+resulting ~2 reconnects/min risk caster throttling. These constants implement
+the post-connect grace window, reconnect backoff, and bounded mutex takes.
+*/
+#define NTRIP_RTCM_TIMEOUT_MS       10000  // steady-state: hang up after this long without RTCM
+#define NTRIP_CONNECT_GRACE_MS      30000  // first no-RTCM window after a (re)connect:
+                                           // VRS spin-up + GGA round-trip need longer
+#define NTRIP_BACKOFF_START_MS       5000  // reconnect-attempt delay after a failure
+#define NTRIP_BACKOFF_MAX_MS        60000  // cap; doubled per consecutive failed or
+                                           // dataless attempt, reset on received RTCM
+#define NTRIP_DRAIN_MAX_BYTES       16384  // per-iteration socket drain cap (backstop
+                                           // against a flooding caster; ~16 s of stream)
+#define GNSS_MUTEX_TIMEOUT_MS        2000  // NTRIP task's bounded mutexSem takes: on
+                                           // timeout skip the I2C work, keep the link
+#define GGA_MUTEX_TIMEOUT_MS          250  // GGA copy/callback takes: a fresh GGA
+                                           // arrives every epoch, skipping one is free
 /*
 The module supports RTK update frequencies ranging from 8 Hz (BeiDou, Galileo, GLONASS, GPS) to
 20 Hz (GPS only), velocity and dynamic heading accuracies of 0.05 m/s and 0.3° respectively and a

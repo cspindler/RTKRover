@@ -9,8 +9,45 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- **NTRIP death spiral under a degraded receiver** (field captures 2026-08-21
+  and 2026-08-24): when the ZED-F9P entered a slow-I2C state, the position task
+  held `mutexSem` 12–26 s per pass, the NTRIP task's `portMAX_DELAY` takes
+  starved it past its own fixed 10 s no-RTCM window, and every fresh caster
+  session was killed in the iteration that opened it (~2 reconnects/min,
+  `bytes_rx` frozen, GGA never sent). Four changes break the spiral:
+  - Every `mutexSem` take in the NTRIP task is bounded (`GNSS_MUTEX_TIMEOUT_MS`
+    2 s; GGA copy and `callbackGPGGA` 250 ms). On timeout the I2C work of that
+    slice is skipped (dropping a redundant correction slice beats stalling the
+    link) while socket drain, GGA push and the heartbeat flag keep running.
+  - The no-RTCM hangup window is 30 s after a (re)connect
+    (`NTRIP_CONNECT_GRACE_MS`, VRS spin-up + GGA round-trip) and 10 s
+    steady-state; a GGA is pushed immediately on connect (gate expired) since
+    the VRS streams nothing before it.
+  - Reconnect backoff: 5 s doubling to 60 s per consecutive failed or dataless
+    attempt, reset by received RTCM (caster etiquette; dataless "successful"
+    connects count as failures).
+  - `updatePosition` pays at most three I2C passes per mutex hold: one
+    freshness check per streamed packet (HPPOSLLH/HPPOSECEF/PVT), then pure
+    cached reads. Previously every stale getter re-ran a hidden ~1 s
+    checkUblox pass (up to ~13 per emit second) which was the actual
+    12–26 s holder (invisible to the checkUblox-only probe).
+
 ### Changed
 
+- The NTRIP socket is drained completely each iteration (buffer-sized slices,
+  16 KB backstop cap) instead of one 2 KB read: unread RTCM no longer piles
+  up in lwIP (the ~7 kB free-heap dips) and the caster no longer sees a zero
+  window from us.
+- `gnss_fix` is emitted only when the receiver delivered a fresh solution: the
+  stream now gaps during receiver stalls instead of repeating stale fixes
+  (PROJECT-PLAN §4.3 note). `heartbeat.ntrip_connected` is updated at every
+  connect/stop, not only at the loop top, so it can no longer report a stale
+  `true` through a stalled iteration.
+- The position-side `gnss_pipe_stall` probe measures the whole mutex-held
+  `updatePosition` body (the 2026-08-24 crawl was invisible to the
+  checkUblox-only probe).
 - moved `telemetryBleStartTask()` before sensor setup, so failures in
   `setupGNSS()` and `setupBNO080()` become visible in diagnostics.
 

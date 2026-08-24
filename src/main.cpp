@@ -439,7 +439,11 @@ volatile bool ggaSentenceComplete = false;
 //        |              |          |
 void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 {
-  if (xSemaphoreTake(mutexSem, portMAX_DELAY)) {
+  // Bounded take: this runs inside the NTRIP task's checkCallbacks(), and a
+  // portMAX_DELAY here was the unattributed ~14 s of the 2026-08-24 stall
+  // capture (position task holding mutexSem through a slow-I2C stretch).
+  // Skipping one GGA is free, the module emits a fresh one every epoch.
+  if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GGA_MUTEX_TIMEOUT_MS))) {
     memset(ggaSentence, 0, NMEA_GGA_MAX_LENGTH);
     strncpy(ggaSentence, (const char *)nmeaData->nmea, nmeaData->length);
     ggaSentenceComplete = true;
@@ -509,42 +513,41 @@ bool setupGNSS()
 
 void updatePosition()
 {
-  coord_t coord;
+  coord_t coord = {0, 0, 0, 0};  // written only under llhFresh below
 
-  // gnss_pipe_stall instrumentation: checkUblox is the suspected long holder
-  // of mutexSem in the 2026-08-21 field slowdown (one position-task iteration
-  // per ~15 s). Measure every call; a slow one becomes a sev-1 error event
-  // naming the duration, so the next episode is diagnosable from Grafana.
-  uint32_t ubxStart_ms = millis();
-  myGNSS.checkUblox();
-  uint32_t ubxMs = millis() - ubxStart_ms;
-  if (ubxMs > GNSS_PIPE_STALL_MS)
+  // gnss_pipe_stall instrumentation (2026-08-24 capture): the long mutexSem
+  // holds were not the explicit checkUblox but the getters' hidden re-entries:
+  // every stale getter re-runs a full checkUblox pass internally (~1 s each
+  // on a degraded bus, up to ~13 per emit second). This function is therefore
+  // structured to pay at most three I2C passes per call: one freshness check
+  // per streamed packet (getHPPOSLLH / getNAVHPPOSECEF / getPVT, each doing
+  // one checkUbloxInternal pass), after which every getter below is a pure
+  // cached read. The whole mutex-held body is measured, not just checkUblox.
+  uint32_t holdStart_ms = millis();
+  bool llhFresh = myGNSS.getHPPOSLLH();       // pass 1 (drains pending I2C)
+  uint32_t llhMs = millis() - holdStart_ms;
+  bool ecefFresh = myGNSS.getNAVHPPOSECEF();  // pass 2 (usually finds nothing new)
+  bool pvtFresh = myGNSS.getPVT();            // pass 3
+
+  int32_t accuracy = 0;
+  if (llhFresh)
   {
-    static uint32_t lastStallEmit_ms = 0;
-    if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
-    {
-      lastStallEmit_ms = millis();
-      char msg[48];
-      snprintf(msg, sizeof(msg), "checkUblox(pos) took %u ms", (unsigned)ubxMs);
-      telemetryEmitError(1, "gnss_pipe_stall", msg);
-    }
+    int32_t lat = myGNSS.getHighResLatitude();
+    int8_t latHp = myGNSS.getHighResLatitudeHp();
+    int32_t lon = myGNSS.getHighResLongitude();
+    int8_t lonHp = myGNSS.getHighResLongitudeHp();
+    accuracy = ecefFresh ? myGNSS.getPositionAccuracy() : 0;
+
+    coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
   }
-
-  int32_t lat = myGNSS.getHighResLatitude();
-  int8_t latHp = myGNSS.getHighResLatitudeHp();
-  int32_t lon = myGNSS.getHighResLongitude();
-  int8_t lonHp = myGNSS.getHighResLongitudeHp();
-  int32_t accuracy = myGNSS.getPositionAccuracy();
-
-  coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
   // Only stream positions the walk may trust: MIN_ACCEPTABLE_ACCURACY_MM
   // was documented in the config but never enforced. When accuracy
-  // degrades past it the position stream simply goes quiet, ubloxUpdatedAt
-  // on the phone goes stale, and the app falls back to internal GPS after
-  // its 3 s freshness window - degraded RTK and lost RTK use the same
-  // fallback, no extra protocol. The 1 Hz gnss_fix telemetry below is
-  // deliberately NOT gated: the dead-zone dataset needs the bad fixes too.
-  if (accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM)
+  // degrades past it (or the receiver stops producing solutions and there
+  // is nothing fresh to send) the position stream simply goes quiet,
+  // ubloxUpdatedAt on the phone goes stale, and the app falls back to
+  // internal GPS after its freshness window. Degraded RTK and lost
+  // RTK use the same fallback.
+  if (llhFresh && accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM)
   {
     // Never block here: this runs holding mutexSem, and with no BLE central
     // draining the queue a portMAX_DELAY send wedged the whole GNSS
@@ -560,18 +563,19 @@ void updatePosition()
   }
 
   // 1 Hz gnss_fix telemetry sample (PROJECT-PLAN.md par. 4.3, the dead-zone
-  // dataset). NAV-PVT/HPPOSLLH/HPPOSECEF arrive streamed (setAuto* in
-  // setupGNSS), so every getter below is a non-blocking read of the cached
-  // packet — no I2C poll round-trips. Emitting is a non-blocking memcpy
-  // into the telemetry ring.
+  // dataset). Emitted only when a fresh solution actually arrived: every
+  // getter below is then a cached read (its packet's freshness was checked
+  // above), so no hidden I2C re-entry happens under the mutex. When the
+  // receiver stops producing solutions the stream gaps instead of repeating
+  // stale fixes. The gap itself is diagnostic (loops_pos + gnss_pipe_stall
+  // tell the rest). Emitting is a non-blocking memcpy into the ring.
   static uint32_t lastFixEmit_ms = 0;
-  if (millis() - lastFixEmit_ms >= 1000)
+  if (llhFresh && pvtFresh && millis() - lastFixEmit_ms >= 1000)
   {
     lastFixEmit_ms = millis();
-    uint32_t emitStart_ms = millis();  // measure the getter cost (debug diag)
     TelemetryGnssFix fix;
-    fix.lat = lat * 1e-7 + latHp * 1e-9;   // UBX 1e-7 deg + 1e-9 high-res part
-    fix.lon = lon * 1e-7 + lonHp * 1e-9;
+    fix.lat = coord.lat * 1e-7 + coord.latHp * 1e-9;  // UBX 1e-7 deg + 1e-9 high-res part
+    fix.lon = coord.lon * 1e-7 + coord.lonHp * 1e-9;
     fix.heightM = myGNSS.getElipsoid() / 1000.0f
                 + myGNSS.getElipsoidHp() / 10000.0f;  // mm + 0.1 mm parts
     fix.fixType = myGNSS.getFixType();
@@ -582,8 +586,24 @@ void updatePosition()
     fix.pdop = myGNSS.getPDOP() * 0.01f;
     fix.corrAgeMs = telemetryCorrAgeMs();
     telemetryEmitGnssFix(fix);
-    DBG.printf("gnss_fix: acc %d mm, getters took %u ms\n",
-               accuracy, millis() - emitStart_ms);
+    DBG.printf("gnss_fix: acc %d mm\n", accuracy);
+  }
+
+  // Whole-hold stall probe: the 2026-08-24 crawl was invisible to a probe
+  // that timed only checkUblox. Anything over threshold for the full body
+  // (all I2C passes + cached reads) becomes the sev-1 event.
+  uint32_t holdMs = millis() - holdStart_ms;
+  if (holdMs > GNSS_PIPE_STALL_MS)
+  {
+    static uint32_t lastStallEmit_ms = 0;
+    if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
+    {
+      lastStallEmit_ms = millis();
+      char msg[80];
+      snprintf(msg, sizeof(msg), "updatePosition held mutex %u ms (llh pass %u ms)",
+               (unsigned)holdMs, (unsigned)llhMs);
+      telemetryEmitError(1, "gnss_pipe_stall", msg);
+    }
   }
 }
 
@@ -631,8 +651,19 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   //=========================================================================
   // 5 RTCM messages take approximately ~300ms to arrive at 115200bps
   long lastReceivedRTCM_ms = 0;
-  // If we fail to get a complete RTCM frame after 10s, then disconnect from caster
-  const int maxTimeBeforeHangup_ms = 10000;
+  // No-RTCM hangup window. Starts at the post-connect grace (the VRS needs
+  // our GGA before it streams; 2026-08-24: a fixed 10 s window expired inside
+  // the post-connect mutex wait and killed every session in the iteration
+  // that opened it), tightens to NTRIP_RTCM_TIMEOUT_MS once data flows.
+  uint32_t rtcmTimeout_ms = NTRIP_CONNECT_GRACE_MS;
+
+  // Reconnect backoff (caster etiquette, refnet throttles reconnect floods):
+  // attemptDelay_ms is waited before the next connect attempt; it is armed
+  // from reconnectDelay_ms at every failed or dataless attempt, which then
+  // doubles up to the cap. Received RTCM resets both.
+  uint32_t reconnectDelay_ms = NTRIP_BACKOFF_START_MS;
+  uint32_t attemptDelay_ms = 0;
+  bool gotDataThisSession = false;
 
   int timeBetweenGGAUpdate_ms = 10000; //GGA is required for Rev2 NTRIP casters. Don't transmit but once every 10 seconds
   long lastTransmittedGGA_ms = 0;
@@ -733,19 +764,31 @@ void task_rtk_get_corrrection_data(void *pvParameters)
                                  telemetryRtcmBytesTotal());
       }
 
+      // Backoff: armed by the previous failed or dataless attempt. Waiting
+      // here (single site) keeps every retry path (TCP fail, caster timeout,
+      // bad response, dataless hangup) on the same schedule.
+      if (attemptDelay_ms > 0)
+      {
+        DBG.printf("NTRIP backoff: waiting %u ms before reconnect\n", attemptDelay_ms);
+        vTaskDelay(attemptDelay_ms/portTICK_PERIOD_MS);
+        attemptDelay_ms = 0;
+        iterStart_ms = millis();  // deliberate pacing, not a pipeline stall
+      }
+
       DBG.print(F("Opening socket to "));
       DBG.println(casterHost.c_str());
 
       // Attempt connection
       if (ntripClient.connect( casterHost.c_str(), (uint16_t)casterPort.toInt() ) == false)
       {
-        DBG.println(F("Connection to caster failed, retry in 5s"));
+        DBG.println(F("Connection to caster failed"));
         if (!outageErrorEmitted)
         {
           outageErrorEmitted = true;
           telemetryEmitError(1, "ntrip_connect_failed", "TCP connect to caster failed");
         }
-        vTaskDelay(5000/portTICK_PERIOD_MS);
+        attemptDelay_ms = reconnectDelay_ms;
+        reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
         continue; // skip to next iteration and retry
       }
       else
@@ -815,7 +858,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           telemetryEmitError(2, "ntrip_request_overflow",
                              "caster request exceeds buffer; check mount point / credential lengths");
           ntripClient.stop();
-          vTaskDelay(5000/portTICK_PERIOD_MS);
+          telemetrySetNtripConnected(false);
+          attemptDelay_ms = reconnectDelay_ms;
+          reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
           continue; // retry loop; config is wrong, but never overflow
         }
         DBG.printf("serverRequest len: %d ", strlen(serverRequest));
@@ -846,12 +891,14 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         }
         if (casterTimedOut)
         {
+          telemetrySetNtripConnected(false);  // stop() happened in the wait loop
           if (!outageErrorEmitted)
           {
             outageErrorEmitted = true;
             telemetryEmitError(1, "ntrip_connect_failed", "caster response timeout");
           }
-          vTaskDelay(5000/portTICK_PERIOD_MS);
+          attemptDelay_ms = reconnectDelay_ms;
+          reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
           continue; // skip to next iteration and retry
         }
 
@@ -892,14 +939,20 @@ void task_rtk_get_corrrection_data(void *pvParameters)
             // noise. The caster response goes in msg (no secrets in it).
             telemetryEmitError(2, "ntrip_bad_response", response);
           }
-          vTaskDelay(5000/portTICK_PERIOD_MS);
+          attemptDelay_ms = reconnectDelay_ms;
+          reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
           continue; // skip to next iteration and retry
         }
         else
         {
           DBG.print(F("Connected to "));
           DBG.println(casterHost.c_str());
-          lastReceivedRTCM_ms = millis(); // Reset timeout
+          lastReceivedRTCM_ms = millis();
+          // Fresh session: full grace window until the first RTCM (the VRS
+          // streams only after our GGA), and nothing received yet.
+          rtcmTimeout_ms = NTRIP_CONNECT_GRACE_MS;
+          gotDataThisSession = false;
+          telemetrySetNtripConnected(true);
 
           successfulConnects++;
           outageErrorEmitted = false;
@@ -908,22 +961,34 @@ void task_rtk_get_corrrection_data(void *pvParameters)
                                    successfulConnects - 1,
                                    telemetryRtcmBytesTotal());
 
+          // Expire the GGA gate so the push block later in this iteration
+          // sends a GGA as soon as one is complete: the VRS computes the
+          // virtual station from it and streams nothing until it arrives.
+          lastTransmittedGGA_ms = millis() - timeBetweenGGAUpdate_ms - 1;
+
           // checkUblox under mutexSem like every other myGNSS I2C access:
           // this runs on core 0 while the position task polls the same
           // object/bus from its own loop - unsynchronized access desyncs
           // the UBX parser and stalled the position getters for seconds
-          // (measured 8.8 s, 2026-07-29). checkCallbacks must stay OUTSIDE
-          // the mutex: it touches no I2C, and it invokes callbackGPGGA,
-          // which takes mutexSem itself (non-recursive - taking it here
-          // would self-deadlock this task and starve positioning).
+          // (measured 8.8 s, 2026-07-29). Bounded take: on timeout skip the
+          // pass: the position task's own passes keep the parser fed, and
+          // this task must reach its read/GGA sections while the grace
+          // window is still open. checkCallbacks must stay outside the
+          // mutex: it touches no I2C, and it invokes callbackGPGGA, which
+          // takes mutexSem itself (non-recursive - taking it here would
+          // self-deadlock this task and starve positioning).
           uint32_t phase_ms = millis();
-          if (xSemaphoreTake(mutexSem, portMAX_DELAY))
+          if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
           {
             mutexWaitMs += millis() - phase_ms;
             phase_ms = millis();
             myGNSS.checkUblox();
             ubxMs += millis() - phase_ms;
             xSemaphoreGive(mutexSem);
+          }
+          else
+          {
+            mutexWaitMs += millis() - phase_ms;
           }
           myGNSS.checkCallbacks();
         }
@@ -933,21 +998,39 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     if (ntripClient.connected() == true)
     {
       uint8_t rtcmData[512 * 4]; // Most incoming data is around 500 bytes but may be larger
-      rtcmCount = 0;
 
-      //Print any available RTCM data
-      while (ntripClient.available())
+      // Drain the socket completely, in buffer-sized slices. A single-buffer
+      // read left the rest queued in lwIP when an iteration ran slow, up to
+      // the 5.7 kB TCP window pinned in pbufs (the observed heap dips), and a
+      // zero-window stall toward the caster. The byte cap is a backstop
+      // against a flooding caster, not an expected limit.
+      uint32_t drainedTotal = 0;
+      while (ntripClient.available() && drainedTotal < NTRIP_DRAIN_MAX_BYTES)
       {
-        //DBG.write(ntripClient.read()); // Pipe to serial port is fine but beware, it's a lot of binary data
-        rtcmData[rtcmCount++] = ntripClient.read();
-        if (rtcmCount == sizeof(rtcmData)) break;
-      }
+        rtcmCount = 0;
+        while (ntripClient.available() && rtcmCount < (long)sizeof(rtcmData))
+        {
+          rtcmData[rtcmCount++] = ntripClient.read();
+        }
+        drainedTotal += rtcmCount;
 
-      if (rtcmCount > 0)
-      {
-        //Push RTCM to GNSS module over I2C
+        // The link is alive: note that independently of whether the push
+        // below wins the mutex. First data also ends the post-connect
+        // grace and resets the reconnect backoff.
+        lastReceivedRTCM_ms = millis();
+        if (!gotDataThisSession)
+        {
+          gotDataThisSession = true;
+          rtcmTimeout_ms = NTRIP_RTCM_TIMEOUT_MS;
+          reconnectDelay_ms = NTRIP_BACKOFF_START_MS;
+        }
+
+        //Push RTCM to GNSS module over I2C. Bounded take: when the position
+        //task is in a slow-I2C stretch, dropping one redundant correction
+        //slice beats stalling the link (the 12-26 s portMAX_DELAY waits here
+        //are what killed every session on 2026-08-24).
         uint32_t phase_ms = millis();
-        if (xSemaphoreTake(mutexSem, portMAX_DELAY))
+        if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
         {
           mutexWaitMs += millis() - phase_ms;
           phase_ms = millis();
@@ -958,12 +1041,13 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           xSemaphoreGive(mutexSem);
           DBG.print(F("RTCM pushed to ZED: "));
           DBG.println(rtcmCount);
-          uint32_t currentTime = millis();
-          DBG.print(F("Last data before ms: "));
-          DBG.println(currentTime - lastReceivedRTCM_ms);
-          lastReceivedRTCM_ms = currentTime;
         }
-
+        else
+        {
+          mutexWaitMs += millis() - phase_ms;
+          DBG.print(F("RTCM slice dropped (mutex busy): "));
+          DBG.println(rtcmCount);
+        }
       }
     }   // End (ntripClient.connected() == true)
 
@@ -979,8 +1063,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       char localGgaSentence[NMEA_GGA_MAX_LENGTH] = {0};
       bool shouldSendGga = false;
 
+      // Bounded take; on timeout the gate is left expired, so the next
+      // iteration (~1 s) retries instead of waiting the full 10 s period.
       uint32_t phase_ms = millis();
-      if (xSemaphoreTake(mutexSem, portMAX_DELAY))
+      if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GGA_MUTEX_TIMEOUT_MS)))
       {
         mutexWaitMs += millis() - phase_ms;
         if (ggaSentenceComplete == true)
@@ -994,6 +1080,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           lastTransmittedGGA_ms = millis();
         }
         xSemaphoreGive(mutexSem);
+      }
+      else
+      {
+        mutexWaitMs += millis() - phase_ms;
       }
 
       if (shouldSendGga)
@@ -1009,16 +1099,28 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       }
     }
 
-    // Close socket if we don't have new data for 10s
-    if (millis() - lastReceivedRTCM_ms > maxTimeBeforeHangup_ms)
+    // Close socket if the no-RTCM window expired (30 s grace right after a
+    // connect, 10 s once data has flowed)
+    if (millis() - lastReceivedRTCM_ms > rtcmTimeout_ms)
     {
       DBG.println(F("RTCM timeout. Disconnecting..."));
       if (ntripClient.connected() == true)
       {
-        // Socket up but no corrections for 10 s - this is the signature of a
+        // Socket up but no corrections. This is the signature of a
         // correction-delivery problem (vs. GNSS degradation, PROJECT-PLAN par. 2)
-        telemetryEmitError(1, "ntrip_rtcm_timeout", "no RTCM for 10 s, dropping caster connection");
+        char msg[64];
+        snprintf(msg, sizeof(msg), "no RTCM for %u s, dropping caster connection",
+                 (unsigned)(rtcmTimeout_ms / 1000));
+        telemetryEmitError(1, "ntrip_rtcm_timeout", msg);
         ntripClient.stop();
+        telemetrySetNtripConnected(false);
+        if (!gotDataThisSession)
+        {
+          // A session that never delivered a byte counts as a failed
+          // attempt: back off before hammering the caster again.
+          attemptDelay_ms = reconnectDelay_ms;
+          reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
+        }
       }
     }
 
