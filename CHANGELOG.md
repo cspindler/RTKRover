@@ -9,6 +9,35 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Added
+
+- **GNSS receiver watchdog + recovery ladder** (bench 4.1, 2026-08-24: the
+  ZED-F9P went mute, and stayed dead 14+ min with no self-recovery, while the
+  firmware cycled dataless caster sessions every ~93 s). The receiver's GGA
+  output (~1/s) is the liveness signal (`lastGgaHeard_ms`, fed by
+  `callbackGPGGA`):
+  - After 30 s of silence (`GNSS_SILENT_AFTER_MS`) caster connects are skipped.
+    A VRS streams nothing without our GGA, so reconnecting a mute receiver is
+    pure caster noise.
+  - A recovery ladder runs every 60 s (`GNSS_RECOVERY_GAP_MS`), escalating per
+    attempt: reconfigure -> GNSS software reset -> hard reset (cold start), each
+    followed by `configureGNSS()` (single-attempt begin + full rover config,
+    extracted from `setupGNSS()` which now retries around it). Every rung emits
+    a sev-2 `gnss_degraded` error naming silence duration, attempt number and
+    action. A real GGA resets the ladder and reopens the gate.
+
+### Changed
+
+- Navigation rate 20 -> 10 Hz (`NAVIGATION_FREQUENCY_HZ`): 20 Hz is beyond the
+  F9P's multi-GNSS RTK spec (20 Hz is GPS-only) and the prime suspect for the
+  receiver wedging into the slow-I2C / mute states of 2026-08-21/24. All
+  consumers sample at <= 10 Hz (100 ms task intervals); halves I2C traffic and
+  module CPU load.
+- `setI2CTransactionSize(128)` (library default 32; the library itself
+  recommends 128 on ESP32): 4x fewer I2C start/stop cycles for the same data.
+- NMEA callback dispatch moved to the top of the NTRIP task loop so the GGA
+  liveness clock ticks in every iteration, including receiver-silent ones.
+
 ### Fixed
 
 - **Heap leak during WiFi outages** (bench captures 2026-08-24: −4 B/s ≈

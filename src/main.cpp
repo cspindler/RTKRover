@@ -447,6 +447,13 @@ void loop()
 char ggaSentence[NMEA_GGA_MAX_LENGTH] = {0};
 volatile bool ggaSentenceComplete = false;
 
+// Receiver-liveness timestamp: millis() of the last GGA sentence the module
+// produced (callbackGPGGA fires with or without a fix, ~1/s at the configured
+// MSGOUT rate). Written from callbackGPGGA and the NTRIP task's re-arm sites.
+// GNSS_SILENT_AFTER_MS without one means the receiver is mute
+// (bench 4.1, 2026-08-24) and drives the recovery ladder.
+static volatile uint32_t lastGgaHeard_ms = 0;
+
 // Callback: callbackGPGGA will be called when new GPGGA NMEA data arrives
 // See u-blox_structs.h for the full definition of NMEA_GGA_data_t
 //         _____  You can use any name you like for the callback. Use the same name when you call setNMEAGPGGAcallback
@@ -456,6 +463,10 @@ volatile bool ggaSentenceComplete = false;
 //        |              |          |
 void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 {
+  // Liveness first, unconditionally: even when the copy below is skipped,
+  // a GGA arriving proves the receiver is producing output.
+  lastGgaHeard_ms = millis();
+
   // Bounded take: this runs inside the NTRIP task's checkCallbacks(), and a
   // portMAX_DELAY here was the unattributed ~14 s of the 2026-08-24 stall
   // capture (position task holding mutexSem through a slow-I2C stretch).
@@ -468,34 +479,23 @@ void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
   }
 }
 
-bool setupGNSS()
+/**
+ * @brief One begin() attempt + the full rover configuration. Shared by boot
+ * (setupGNSS, which retries around it) and the runtime recovery ladder in
+ * the NTRIP task (which calls it holding mutexSem after a reset).
+ * Never loops/blocks on an unresponsive module.
+ *
+ * @return true if the module responded and every config write was accepted
+ */
+static bool configureGNSS()
 {
-    bool busFailEmitted = false;   // one error event per setup, not per retry
-    while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN))
-    {
-      DBG.println(F("I2C for RTK not running, check cable!"));
-      if (!busFailEmitted)
-      {
-        busFailEmitted = true;
-        telemetryEmitError(2, "i2c_bus_rtk_failed", "Wire1.begin() failing, check cable");
-      }
-      delay(500);
-    }
+    if (myGNSS.begin(Wire1, RTK_I2C_ADDR) == false)
+      return false;
 
-    Wire1.setClock(I2C_FREQUENCY_400K);
-
-    bool gnssFailEmitted = false;
-    while (myGNSS.begin(Wire1, RTK_I2C_ADDR) == false)
-    {
-      DBG.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing loop."));
-      if (!gnssFailEmitted)
-      {
-        gnssFailEmitted = true;
-        // Severity 3: without the ZED-F9P there is no positioning at all.
-        telemetryEmitError(3, "i2c_gnss_not_detected", "ZED-F9P begin() failing, check wiring");
-      }
-      blinkOneTime(500, false);
-    }
+    // Fewer, larger I2C transactions: 4x fewer start/stop cycles for the
+    // same data (library default is 32; the lib itself recommends 128 on
+    // ESP32, whose Wire buffer is 128 B).
+    myGNSS.setI2CTransactionSize(128);
 
     bool response = true;
     response &= myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_NMEA); // Set the I2C port to output both NMEA and UBX messages
@@ -523,9 +523,43 @@ bool setupGNSS()
     DBG.println(rate);
 
     response &= myGNSS.setNMEAGPGGAcallbackPtr(&callbackGPGGA); // Set up the callback for GPGGA
-    response &= myGNSS.setVal8(UBLOX_CFG_MSGOUT_NMEA_ID_GGA_I2C, 10); // Tell the module to output GGA every 10 seconds
+    // GGA every 10th nav epoch = 1/s at 10 Hz. This doubles as the
+    // receiver-liveness signal (lastGgaHeard_ms), so keep it ~1 Hz.
+    response &= myGNSS.setVal8(UBLOX_CFG_MSGOUT_NMEA_ID_GGA_I2C, 10);
 
     return response;
+}
+
+bool setupGNSS()
+{
+    bool busFailEmitted = false;   // one error event per setup, not per retry
+    while (!Wire1.begin(RTK_SDA_PIN, RTK_SCL_PIN))
+    {
+      DBG.println(F("I2C for RTK not running, check cable!"));
+      if (!busFailEmitted)
+      {
+        busFailEmitted = true;
+        telemetryEmitError(2, "i2c_bus_rtk_failed", "Wire1.begin() failing, check cable");
+      }
+      delay(500);
+    }
+
+    Wire1.setClock(I2C_FREQUENCY_400K);
+
+    bool gnssFailEmitted = false;
+    while (!configureGNSS())
+    {
+      DBG.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing loop."));
+      if (!gnssFailEmitted)
+      {
+        gnssFailEmitted = true;
+        // Severity 3: without the ZED-F9P there is no positioning at all.
+        telemetryEmitError(3, "i2c_gnss_not_detected", "ZED-F9P begin() failing, check wiring");
+      }
+      blinkOneTime(500, false);
+    }
+
+    return true;
 }
 
 void updatePosition()
@@ -682,6 +716,15 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   uint32_t attemptDelay_ms = 0;
   bool gotDataThisSession = false;
 
+  // GNSS receiver recovery ladder (bench 4.1, 2026-08-24: module went fully
+  // mute for 14+ min, no self-recovery). Stage escalates per attempt:
+  // 0 = reconfigure, 1 = GNSS software reset, 2+ = hard reset (cold start).
+  // A real GGA (lastGgaHeard_ms) resets the stage.
+  uint8_t gnssRecoveryStage = 0;
+  uint32_t gnssRecoveryCount = 0;
+  uint32_t lastGnssRecovery_ms = 0;
+  lastGgaHeard_ms = millis();  // arm the liveness clock at task start
+
   int timeBetweenGGAUpdate_ms = 10000; //GGA is required for Rev2 NTRIP casters. Don't transmit but once every 10 seconds
   long lastTransmittedGGA_ms = 0;
 
@@ -741,6 +784,91 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     }
     wasConnected = nowConnected;
 
+    // Dispatch pending NMEA callbacks at the loop top so callbackGPGGA runs
+    // in EVERY iteration, including receiver-silent ones that skip the
+    // caster below: it feeds the GGA push, and it is the liveness signal
+    // (lastGgaHeard_ms) the gate and recovery ladder depend on. Must stay
+    // OUTSIDE mutexSem: no I2C here, and callbackGPGGA takes the
+    // (non-recursive) mutex itself.
+    myGNSS.checkCallbacks();
+
+    // --- GNSS receiver watchdog / recovery ladder --------------------------
+    if (millis() - lastGgaHeard_ms <= GNSS_SILENT_AFTER_MS)
+    {
+      gnssRecoveryStage = 0;  // receiver talking: episode over (if any)
+    }
+    else
+    {
+      // Receiver silent. Keep the parser fed ourselves: with the caster
+      // gated below and (on a boot-time mute) the position task still
+      // parked on beginPositioning, nobody else may be running checkUblox;
+      // and after a successful reset the revived stream must get parsed for
+      // lastGgaHeard_ms to ever recover. Cheap while mute (no bytes).
+      uint32_t phase_ms = millis();
+      if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
+      {
+        mutexWaitMs += millis() - phase_ms;
+        phase_ms = millis();
+        myGNSS.checkUblox();
+        ubxMs += millis() - phase_ms;
+        xSemaphoreGive(mutexSem);
+      }
+      else
+      {
+        mutexWaitMs += millis() - phase_ms;
+      }
+      myGNSS.checkCallbacks();
+
+      if (millis() - lastGnssRecovery_ms >= GNSS_RECOVERY_GAP_MS)
+      {
+        lastGnssRecovery_ms = millis();
+        gnssRecoveryCount++;
+        uint32_t silentFor_s = (millis() - lastGgaHeard_ms) / 1000;
+        const char *action = "skipped (mutex busy)";
+        bool attempted = false;
+        bool configured = false;
+        phase_ms = millis();
+        if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_RECOVERY_MUTEX_MS)))
+        {
+          mutexWaitMs += millis() - phase_ms;
+          attempted = true;
+          switch (gnssRecoveryStage)
+          {
+            case 0:
+              action = "reconfigure";
+              configured = configureGNSS();
+              break;
+            case 1:
+              action = "sw reset";
+              myGNSS.softwareResetGNSSOnly();
+              vTaskDelay(2000/portTICK_PERIOD_MS);  // module restart time
+              configured = configureGNSS();
+              break;
+            default:
+              action = "hard reset";
+              myGNSS.hardReset();  // cold start: last resort, loses ephemeris
+              vTaskDelay(2000/portTICK_PERIOD_MS);
+              configured = configureGNSS();
+              break;
+          }
+          xSemaphoreGive(mutexSem);
+          if (gnssRecoveryStage < 2) gnssRecoveryStage++;
+        }
+        else
+        {
+          mutexWaitMs += millis() - phase_ms;
+        }
+        char msg[96];
+        snprintf(msg, sizeof(msg), "receiver silent %u s, recovery #%u: %s%s",
+                 (unsigned)silentFor_s, (unsigned)gnssRecoveryCount, action,
+                 !attempted ? "" : (configured ? " ok" : " (module not answering)"));
+        telemetryEmitError(2, "gnss_degraded", msg);
+        DBG.printf("gnss_degraded: %s\n", msg);
+        // Deliberate maintenance (includes the 2 s reset wait), not a stall.
+        iterStart_ms = millis();
+      }
+    }
+
     /*
     This ist most of the content beginServing() func from the
     Sparkfun u-blox GNSS Arduino Library/ZED-F9P/Example15-NTRIPClient
@@ -762,8 +890,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // wedged driver, after WIFI_REINIT_AFTER_MS without association.
       uint32_t wifiDown_ms = millis();
       uint32_t lastNudge_ms = millis();
+      bool wifiWaited = false;
       while (!WiFi.isConnected())
       {
+        wifiWaited = true;
         DBG.println(F("task_rtk_get_corr_data loop: Not connected to WiFi station"));
         DBG.printf("WiFi state: %d", WiFi.status());
         DBG.println();
@@ -789,9 +919,30 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         blinkOneTime(100, false);
       }
       wifiLossEmitted = false;
-      // A WiFi outage is reported by wifi_disconnected, not gnss_pipe_stall:
-      // restart the iteration clock so outage time doesn't count as a stall.
-      iterStart_ms = millis();
+      if (wifiWaited)
+      {
+        // A WiFi outage is reported by wifi_disconnected, not
+        // gnss_pipe_stall: restart the iteration clock so outage time
+        // doesn't count as a stall. And while blocked above,
+        // checkCallbacks never ran, so the liveness clock is stale
+        // regardless of the receiver's health. Re-arm it: the receiver
+        // gets GNSS_SILENT_AFTER_MS to prove itself before gate/ladder act.
+        iterStart_ms = millis();
+        lastGgaHeard_ms = millis();
+      }
+
+      // Receiver-liveness gate: a mute F9P produces no GGA, and the VRS
+      // streams nothing without one. Connecting would only cycle dataless
+      // sessions against the caster (~93 s cycle observed, bench 4.1). The
+      // recovery ladder above owns this state; skip caster attempts until
+      // the receiver talks again. (checkCallbacks/ladder already ran this
+      // iteration, so pacing out via the loop is safe.)
+      if (millis() - lastGgaHeard_ms > GNSS_SILENT_AFTER_MS)
+      {
+        DBG.println(F("NTRIP connect skipped: receiver silent"));
+        vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
+        continue;
+      }
 
       if (successfulConnects > 0 && !reconnectingEmitted)
       {
@@ -1090,11 +1241,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       }
     }   // End (ntripClient.connected() == true)
 
-    // Dispatch pending NMEA callbacks every iteration, or callbackGPGGA never
-    // refreshes ggaSentenceComplete after the connect-time call above and the
-    // VRS caster drops us for not sending GGA. Must stay OUTSIDE mutexSem:
-    // no I2C here, and callbackGPGGA takes the (non-recursive) mutex itself.
-    myGNSS.checkCallbacks();
+    // (NMEA callbacks are dispatched at the loop top, before the
+    // receiver-liveness gate — see there.)
 
     //Provide the caster with our current position as needed
     if (ntripClient.connected() == true && (millis() - lastTransmittedGGA_ms) > timeBetweenGGAUpdate_ms)

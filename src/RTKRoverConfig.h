@@ -153,8 +153,29 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       12
 #define TASK_WIFI_RTK_DATA_INTERVAL_MS               1000  //200 Get fresh correction data from caster
 #define MIN_ACCEPTABLE_ACCURACY_MM                   8000  // Device will only send if accuray is better than this
-#define NAVIGATION_FREQUENCY_HZ                        20    // Set solution output to x times a second
+#define NAVIGATION_FREQUENCY_HZ                        10  // Solution output rate. 20 Hz is beyond the
+                                                           // F9P's multi-GNSS RTK spec (20 Hz is GPS-only)
+                                                           // and is the prime suspect for the receiver
+                                                           // wedging into a slow-I2C / mute state
+                                                           // (2026-08-21/24). All consumers sample at
+                                                           // <= 10 Hz anyway (100 ms task intervals).
 #define CONNECTION_TIMEOUT_MS                       10000
+
+/*
+=================================================================================
+                    GNSS receiver watchdog / recovery (2026-08-24)
+=================================================================================
+Bench 4.1: the ZED-F9P went fully mute (no output at all) and stayed dead for
+14+ min with no self-recovery, while the firmware politely cycled dataless
+caster sessions. The receiver's GGA output (~1/s) is the liveness signal: on
+silence, caster connects are skipped (a VRS streams nothing without our GGA
+anyway) and a recovery ladder kicks in: reconfigure -> GNSS software reset ->
+full hard reset (cold start), one rung per gap interval.
+*/
+#define GNSS_SILENT_AFTER_MS        30000  // no GGA for this long = receiver silent
+#define GNSS_RECOVERY_GAP_MS        60000  // min spacing between recovery attempts
+#define GNSS_RECOVERY_MUTEX_MS       5000  // mutex take bound for recovery I2C work
+                                           // (position-task holds stay < 5 s)
 
 /*
 =================================================================================
