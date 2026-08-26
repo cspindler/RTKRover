@@ -9,6 +9,12 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- Read caster response until NUL-terminator, prevent reading past the received
+  data into stale stack memory.
+- Properly parse source-table response, reporting such as errors.
+
 ## [0.45.0] - 2026-08-25
 
 ### Added

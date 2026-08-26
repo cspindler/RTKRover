@@ -1102,15 +1102,22 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           if (responseSpot == sizeof(response) - 1) break;
 
           response[responseSpot++] = ntripClient.read();
-          if (strstr(response, "200") > 0) // Look for 'ICY 200 OK'
-            connectionSuccess = true;
-          if (strstr(response, "401") > 0) // Look for '401 Unauthorized'
-          {
-            DBG.println(F("Your credentials look bad!\nCheck you caster username, password and ban status (got email from rtk2go?)"));
-            connectionSuccess = false;
-          }
         }
         response[responseSpot] = '\0';
+
+        if (strstr(response, "SOURCETABLE") != NULL ||
+            strstr(response, "sourcetable") != NULL)
+        {
+          DBG.println(F("Caster returned its source table - mount point unknown to the caster"));
+        }
+        else if (strstr(response, "401") != NULL) // '401 Unauthorized'
+        {
+          DBG.println(F("Your credentials look bad!\nCheck you caster username, password and ban status (got email from rtk2go?)"));
+        }
+        else if (strstr(response, "200") != NULL) // 'ICY 200 OK' / 'HTTP/1.1 200 OK'
+        {
+          connectionSuccess = true;
+        }
 
         DBG.print(F("Caster responded with: "));
         DBG.println(response);
