@@ -194,6 +194,10 @@ the post-connect grace window, reconnect backoff, and bounded mutex takes.
                                            // dataless attempt, reset on received RTCM
 #define NTRIP_DRAIN_MAX_BYTES       16384  // per-iteration socket drain cap (backstop
                                            // against a flooding caster; ~16 s of stream)
+#define NTRIP_GGA_FIX_MAX_AGE_MS    30000  // connect gate: require a GGA with a fix
+                                           // (quality >= 1) at most this old - a VRS
+                                           // can't use a fixless GGA, so connecting
+                                           // without one only cycles dataless sessions
 #define GNSS_MUTEX_TIMEOUT_MS        2000  // NTRIP task's bounded mutexSem takes: on
                                            // timeout skip the I2C work, keep the link
 #define GGA_MUTEX_TIMEOUT_MS          250  // GGA copy/callback takes: a fresh GGA

@@ -16,6 +16,14 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   2026-08-25, rwa-hs-1): no polling -> no fresh GGA -> VRS streams nothing -> no
   RTCM -> still parked. Fixless runs are cheap and gnss_fix telemetry now shows
   them.
+- Don't send fixless GGA to the caster, and don't connect without one: a
+  quality-0 sentence no longer reaches `ggaSentence` (`ggaFixQuality()` in
+  `callbackGPGGA`), and a new connect gate next to the receiver-liveness gate
+  requires a fix-quality GGA at most 30 s old (`NTRIP_GGA_FIX_MAX_AGE_MS`).
+  Acquire first, connect second. Consequence: a unit losing fix for > 30 s stops
+  reconnecting until fix returns, and a mid-session fix loss stops the GGA
+  pushes (the RTCM timeout then closes the session) instead of repeating the
+  last position.
 
 ### Fixed
 

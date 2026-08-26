@@ -453,6 +453,29 @@ volatile bool ggaSentenceComplete = false;
 // (bench 4.1, 2026-08-24) and drives the recovery ladder.
 static volatile uint32_t lastGgaHeard_ms = 0;
 
+// millis() of the last GGA carrying a fix (quality field >= 1), 0 = never.
+// Drives the NTRIP connect gate: the VRS computes its virtual station from
+// our GGA, and a fixless one is unusable to it. Same single-writer situation
+// as lastGgaHeard_ms (callbackGPGGA only runs from the NTRIP task's
+// checkCallbacks dispatch).
+static volatile uint32_t lastFixGgaHeard_ms = 0;
+
+// GGA fix-quality field (7th comma-separated field; 0 = no fix). Returns 0 on
+// any parse shortfall: an unparseable sentence shouldn't count as a fix.
+static uint8_t ggaFixQuality(const uint8_t *nmea, uint16_t length)
+{
+  uint8_t commas = 0;
+  for (uint16_t i = 0; i < length; i++)
+  {
+    if (nmea[i] != ',') continue;
+    if (++commas < 6) continue;
+    if (i + 1 < length && nmea[i + 1] >= '0' && nmea[i + 1] <= '9')
+      return nmea[i + 1] - '0';
+    return 0;
+  }
+  return 0;
+}
+
 // Callback: callbackGPGGA will be called when new GPGGA NMEA data arrives
 // See u-blox_structs.h for the full definition of NMEA_GGA_data_t
 //         _____  You can use any name you like for the callback. Use the same name when you call setNMEAGPGGAcallback
@@ -465,6 +488,14 @@ void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
   // Liveness first, unconditionally: even when the copy below is skipped,
   // a GGA arriving proves the receiver is producing output.
   lastGgaHeard_ms = millis();
+
+  // Store only sentences with a fix: what reaches ggaSentence is what gets
+  // pushed to the caster, and a fixless GGA shouldn't go there.
+  // No fix also leaves ggaSentenceComplete un-armed, so a mid-session fix loss
+  // stops the pushes instead of repeating the last position.
+  if (ggaFixQuality(nmeaData->nmea, nmeaData->length) == 0)
+    return;
+  lastFixGgaHeard_ms = millis();
 
   // Bounded take: this runs inside the NTRIP task's checkCallbacks(), and a
   // portMAX_DELAY here was the unattributed ~14 s of the 2026-08-24 stall
@@ -937,6 +968,18 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (millis() - lastGgaHeard_ms > GNSS_SILENT_AFTER_MS)
       {
         DBG.println(F("NTRIP connect skipped: receiver silent"));
+        vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
+        continue;
+      }
+
+      // Fix gate: don't open a session before the receiver has a usable
+      // position for the VRS. The receiver's health is visible regardless -
+      // the position task emits gnss_fix (fix_type 0) throughout acquisition.
+      // 0 = no fix-quality GGA seen since boot.
+      if (lastFixGgaHeard_ms == 0 ||
+          millis() - lastFixGgaHeard_ms > NTRIP_GGA_FIX_MAX_AGE_MS)
+      {
+        DBG.println(F("NTRIP connect skipped: no GNSS fix"));
         vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
         continue;
       }
