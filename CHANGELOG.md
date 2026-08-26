@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-08-26
+
 ### Changed
 
 - Don't park `task_rtk_get_rover_position`s first run: keep polling the

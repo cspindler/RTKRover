@@ -15,7 +15,7 @@
 // Semver base; bump on feature/breaking changes. The full FW_VERSION reported
 // in telemetry heartbeats is FW_VERSION_BASE "+" <git hash>, composed in
 // src/telemetry/telemetry.h from the build-time generated header.
-#define FW_VERSION_BASE               "0.45.0"
+#define FW_VERSION_BASE               "0.45.1"
 
 /*
 =================================================================================
