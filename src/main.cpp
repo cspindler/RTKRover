@@ -152,7 +152,6 @@ void setupBNO080(void);
 =================================================================================
 */
 long lastTime = 0; //Simple local timer. Limits amount if I2C traffic to Ublox module.
-bool beginPositioning = false;  // Wait with positioning for first correction data from caster
 
 // The ESP32 core has a built in base64 library but not every platform does
 // We'll use an external lib if necessary.
@@ -671,8 +670,6 @@ void task_rtk_get_rover_position(void *pvParameters)
   // Measure stack size
   UBaseType_t uxHighWaterMark;
 
-  // Wait for first correction data
-  while ( ! beginPositioning) { vTaskDelay(1000/portTICK_PERIOD_MS); }
 
   while (true)
   {
@@ -799,11 +796,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
     }
     else
     {
-      // Receiver silent. Keep the parser fed ourselves: with the caster
-      // gated below and (on a boot-time mute) the position task still
-      // parked on beginPositioning, nobody else may be running checkUblox;
-      // and after a successful reset the revived stream must get parsed for
-      // lastGgaHeard_ms to ever recover. Cheap while mute (no bytes).
+      // Receiver silent. Keep the parser fed from here too: the position
+      // task polls as well (unconditionally since the boot-deadlock fix),
+      // but this pass is cheap while mute (no bytes) and guarantees the
+      // revived stream gets parsed for lastGgaHeard_ms to recover even if
+      // that task is wedged on a degraded bus.
       uint32_t phase_ms = millis();
       if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
       {
@@ -1233,7 +1230,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           phase_ms = millis();
           myGNSS.pushRawData(rtcmData, rtcmCount, false);
           pushMs += millis() - phase_ms;
-          beginPositioning = true;
           telemetryNoteRtcmPushed(rtcmCount);  // feeds corr_age_ms + bytes_rx
           xSemaphoreGive(mutexSem);
           DBG.print(F("RTCM pushed to ZED: "));

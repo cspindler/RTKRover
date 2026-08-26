@@ -9,6 +9,14 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- Don't park `task_rtk_get_rover_position`s first run: keep polling the
+  receiver. Parking it until the first RTCM push deadlocked cold boots (observed
+  2026-08-25, rwa-hs-1): no polling -> no fresh GGA -> VRS streams nothing -> no
+  RTCM -> still parked. Fixless runs are cheap and gnss_fix telemetry now shows
+  them.
+
 ### Fixed
 
 - Read caster response until NUL-terminator, prevent reading past the received
