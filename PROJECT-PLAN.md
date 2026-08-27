@@ -299,7 +299,7 @@ the backend stores ones it does not know about without any change.
 
 ### 5.1 GATT UUIDs
 
-Same vendor family as the existing tracker service (`713D0000-…`), new service:
+Same vendor family as the existing tracker service (`713D0000-...`), new service:
 
 | | UUID |
 | --- | --- |
@@ -307,11 +307,25 @@ Same vendor family as the existing tracker service (`713D0000-…`), new service
 | TX (notify) | `713D0101-503E-4C75-BA94-3148F18D941E` |
 | CTRL (write) | `713D0102-503E-4C75-BA94-3148F18D941E` |
 
+Tracker service (`713D0000-...`), all notify-only:
+
+| | UUID | |
+| --- | --- | --- |
+| Heading, binary (§5.5) | `713D0005-503E-4C75-BA94-3148F18D941E` | rtk-rover ≥ 0.46.0 |
+| Heading, ASCII (legacy) | `713D0002-503E-4C75-BA94-3148F18D941E` | RWAHT only; rtk-rover ≤ 0.45.x |
+| Raw position | `713D0004-503E-4C75-BA94-3148F18D941E` | rtk-rover |
+| *(reserved)* | `713D0003-503E-4C75-BA94-3148F18D941E` | historic `TRACKERSERVICERX`, never reuse |
+
 The telemetry service is **not advertised**: the 31-byte advertisement is already full with the
 tracker service UUID. The app connects on the tracker service as before and discovers telemetry
 afterwards. This is also how the app tells the two assembly kinds apart: the plain headtracker
 (RWAHT) exposes only the tracker service with `713D0002`; the RTK headtracker additionally
-exposes the raw position characteristic `713D0004` and the telemetry service.
+exposes the binary heading characteristic `713D0005`, the raw position characteristic
+`713D0004` and the telemetry service. The apps pick the heading decoder **per characteristic**:
+binary frames on `713D0005` when it exists, the ASCII format on `713D0002` otherwise
+(RWAHT fallback). An rtk-rover ≥ 0.46.0 assembly emits **no** ASCII heading at all, so apps
+older than the `713D0005` decoder get no heading from it — fleet firmware and apps ship
+together.
 
 ### 5.2 Framing details
 
@@ -395,6 +409,40 @@ Write `[u8 cmd][args…]` to the CTRL characteristic. Unknown commands are ignor
 asked for on demand — the app waits for the next state change, or the next 60 s IMU report.
 If the Diagnostics tab ever needs a complete snapshot on demand, that is a firmware change,
 not an app one. (The app does not write CTRL today.)
+
+### 5.5 Binary heading frame (`713D0005`, rtk-rover ≥ 0.46.0)
+
+One notification = one frame = **16 bytes, little-endian, packed** (fits the 20 B
+default-MTU notify payload; no reassembly, no length prefix). ~100 Hz while a
+central is connected. This is a cross-repo contract: encoder in `rtk-rover`
+`src/main.cpp` (`heading_frame_t`), decoders in `rwa-player`
+(`HeadtrackerManager.swift`) and `rwa-creator` (`bluetooth/devicehandler.cpp`).
+
+| offset | field | type | meaning |
+| --- | --- | --- | --- |
+| 0 | `seq` | u16 | frame counter; starts at 1 each boot, wraps at 65535. Gaps = dropped frames (diagnostic only, like `dev_seq`) |
+| 2 | `t_dev_ms` | u32 | device `millis()` when the frame was built |
+| 6 | `qi` | i16 Q14 | quaternion x \* 16384 |
+| 8 | `qj` | i16 Q14 | quaternion y \* 16384 |
+| 10 | `qk` | i16 Q14 | quaternion z \* 16384 |
+| 12 | `qw` | i16 Q14 | quaternion w (real) \* 16384 |
+| 14 | `linAccelZ` | i16 | linear acceleration z in cm/s² (m/s² \* 100) |
+
+The quaternion is the BNO080 **ARVR-stabilized rotation vector** (mag-fused,
+yaw-referenced to magnetic north), unit-length before quantization; components are
+clamped to the i16 range. Apps drop frames whose length is not exactly 16 (count, log).
+
+Canonical angle conversion: all consumers implement this specific math so a
+given frame renders the same everywhere (it reproduces the pre-0.46 firmware's
+Euler convention; normalizing the decoded quaternion is unnecessary — both
+`atan2` forms are scale-invariant):
+
+```
+azimuth_deg   = -atan2(2(qi \* qj + qk \* qw), qi^2 − qj^2 − qk^2 + qw^2)  \*  180/pi
+                if azimuth_deg < 0: azimuth_deg += 360        -> [0, 360), clockwise-positive
+elevation_deg = -atan2(2(qj \* qk + qi \* qw), −qi^2 − qj^2 + qk^2 + qw^2)  \*  180/pi
+linAccelZ_ms2 = linAccelZ / 100
+```
 
 ---
 
@@ -485,3 +533,4 @@ Operations: nightly `pg_dump` to S3 (host cron + `scripts/backup.sh`), disk-usag
 | 2026-08 | `source` enum on every event (`rtk_headtracker` / `headtracker` / `phone` / `creator`); one `gnss_fix` stream per source | the old values mixed sensor and emitter and were absent on firmware events; the RTK assembly produced two fixes per second |
 | 2026-08 | §4–5 re-checked against shipped firmware 0.44.3 | key tables matched exactly; the prose had drifted (status_dump scope, imu_status cadence, frame splitting, error codes, advertising) |
 | 2026-08 | Reduced positioning reporting frequency to 10 Hz | reduce I2C load on ZED-F9P |
+| 2026-08 | Binary heading frame on `713D0005` (§5.5), rtk-rover 0.46.0; `713D0002` ASCII heading frozen as RWAHT-only | head-tracking latency: the ASCII path quantized to integer degrees, carried no seq/timestamp, and rode on a sensor FIFO that delivered stale oldest-first samples; no dual-emit, so fleet firmware and apps ship together |
