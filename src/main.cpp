@@ -1531,6 +1531,8 @@ void setupBLE(void)
 void setupBNO080()
 {
   Wire.begin();
+  // 400 kHz, same as GNSS bus (Wire1)
+  Wire.setClock(I2C_FREQUENCY_400K);
   bool beginFailEmitted = false;  // one error event per setup, not per retry
   while (!bno080.begin())
   {
