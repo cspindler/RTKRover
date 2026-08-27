@@ -1653,6 +1653,14 @@ void task_bno_orientation_via_ble(void *pvParameters)
   uint32_t imuResets = 0;
   uint32_t lastImuStatus_ms = millis();
 
+#if DEBUGGING
+  // Latency instrumentation: per-second poll/consume stats. A sensor-side
+  // report backlog shows up as consumed << produced (~200/s with rotation
+  // vector + linear accel at 100 Hz each); read cost tracks the I2C bus speed.
+  uint32_t bnoTicks = 0, bnoReports = 0, bnoMisses = 0;
+  uint32_t bnoLastRead_us = 0, bnoLastStats_ms = millis();
+#endif
+
   float quatI, quatJ, quatK, quatReal, yawDegreeF, pitchDegreeF, linAccelZF;// rollDegreeF;
   int pitchDegree, yawDegree;// rollDegree;
   String dataStr((char *)0);
@@ -1683,9 +1691,25 @@ void task_bno_orientation_via_ble(void *pvParameters)
         imuSampleCount = 0;
       }
 
+#if DEBUGGING
+      bnoTicks++;
+      if (millis() - bnoLastStats_ms >= 1000)
+      {
+        DBG.printf("bno stats: ticks %u, reports %u, misses %u, last read %u us\n",
+                   bnoTicks, bnoReports, bnoMisses, bnoLastRead_us);
+        bnoTicks = bnoReports = bnoMisses = 0;
+        bnoLastStats_ms = millis();
+      }
+      uint32_t bnoReadStart_us = micros();
+#endif
+
       // TODO: Separate reading values from sending values
       if (bno080.dataAvailable())
       {
+#if DEBUGGING
+        bnoLastRead_us = micros() - bnoReadStart_us;
+        bnoReports++;
+#endif
         imuSampleCount++;
         quatI = bno080.getQuatI();
         quatJ = bno080.getQuatJ();
@@ -1721,6 +1745,9 @@ void task_bno_orientation_via_ble(void *pvParameters)
         }
         else
         {
+#if DEBUGGING
+          bnoMisses++;
+#endif
           DBG.println(F("Ready for BNO080 dataAvailable"));
           vTaskDelay(1000/portTICK_PERIOD_MS);
         }
