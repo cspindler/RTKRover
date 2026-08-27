@@ -1745,11 +1745,12 @@ void task_bno_orientation_via_ble(void *pvParameters)
         }
         else
         {
+          // No report this tick: fall through to the normal tick delay. Any
+          // extra wait here is a head-tracking freeze (this used to stall 1 s
+          // per missed poll); misses are counted in the debug stats instead.
 #if DEBUGGING
           bnoMisses++;
 #endif
-          DBG.println(F("Ready for BNO080 dataAvailable"));
-          vTaskDelay(1000/portTICK_PERIOD_MS);
         }
         // Measure stack size
         // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
