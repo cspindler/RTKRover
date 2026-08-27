@@ -1759,11 +1759,6 @@ void task_bno_orientation_via_ble(void *pvParameters)
 
       }
       vTaskDelay(TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
-      // taskYIELD(); // 11.25 ms is the BLE connection interval, makes no sense to try to send faster
-    if (!bno080.dataAvailable())
-    {
-      DBG.println(F("No BNO080 dataAvailable"));
-    }
     }
   // Delete self task
   vTaskDelete(NULL);
