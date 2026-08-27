@@ -1659,7 +1659,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
   // Latency instrumentation: per-second poll/consume stats. A sensor-side
   // report backlog shows up as consumed << produced (~200/s with rotation
   // vector + linear accel at 100 Hz each); read cost tracks the I2C bus speed.
-  uint32_t bnoTicks = 0, bnoReports = 0, bnoMisses = 0;
+  uint32_t bnoTicks = 0, bnoReports = 0, bnoMisses = 0, bnoMaxDrain = 0;
   uint32_t bnoLastRead_us = 0, bnoLastStats_ms = millis();
 #endif
 
@@ -1697,21 +1697,35 @@ void task_bno_orientation_via_ble(void *pvParameters)
       bnoTicks++;
       if (millis() - bnoLastStats_ms >= 1000)
       {
-        DBG.printf("bno stats: ticks %u, reports %u, misses %u, last read %u us\n",
-                   bnoTicks, bnoReports, bnoMisses, bnoLastRead_us);
-        bnoTicks = bnoReports = bnoMisses = 0;
+        DBG.printf("bno stats: ticks %u, reports %u, misses %u, max drain %u, last drain %u us\n",
+                   bnoTicks, bnoReports, bnoMisses, bnoMaxDrain, bnoLastRead_us);
+        bnoTicks = bnoReports = bnoMisses = bnoMaxDrain = 0;
         bnoLastStats_ms = millis();
       }
       uint32_t bnoReadStart_us = micros();
 #endif
 
-      // TODO: Separate reading values from sending values
-      if (bno080.dataAvailable())
+      // Drain the sensor-side queue and use only the newest values: the
+      // BNO080 produces reports faster than one per tick, and a backlog in
+      // its FIFO is delivered oldest-first, i.e. as stale orientation. Each
+      // dataAvailable() consumes one SHTP report into the library's cached
+      // values; after the drain those hold the freshest quaternion/accel.
+      uint8_t drained = 0;
+      while (drained < BNO080_DRAIN_MAX_REPORTS && bno080.dataAvailable())
       {
+        drained++;
+      }
 #if DEBUGGING
-        bnoLastRead_us = micros() - bnoReadStart_us;
-        bnoReports++;
+      bnoLastRead_us = micros() - bnoReadStart_us;
+      bnoReports += drained;
+      if (drained > bnoMaxDrain) bnoMaxDrain = drained;
+      if (drained == 0) bnoMisses++;
 #endif
+
+      // A tick with no report just waits the normal tick delay: any extra
+      // wait here is a head-tracking freeze (a miss used to stall 1 s).
+      if (drained > 0)
+      {
         imuSampleCount++;
         quatI = bno080.getQuatI();
         quatJ = bno080.getQuatJ();
@@ -1743,22 +1757,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
                 + DATA_STR_DELIMITER + String(linAccelZF, LIN_ACCEL_Z_DECIMAL_DIGITS);
         pHeadtrackerCharacteristic->setValue(dataStr.c_str());
         pHeadtrackerCharacteristic->notify();
-        // DBG.println(linAccelZF);
-        }
-        else
-        {
-          // No report this tick: fall through to the normal tick delay. Any
-          // extra wait here is a head-tracking freeze (this used to stall 1 s
-          // per missed poll); misses are counted in the debug stats instead.
-#if DEBUGGING
-          bnoMisses++;
-#endif
-        }
-        // Measure stack size
-        // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-        // DBG.print(F("task_bno_orientation_via_ble loop, uxHighWaterMark: "));
-        // DBG.println(uxHighWaterMark);
-
+      }
       }
       vTaskDelay(TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
     }

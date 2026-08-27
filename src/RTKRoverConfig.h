@@ -132,6 +132,11 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define I2C_FREQUENCY_400K              400000  // 400 kHz
 #define BNO080_ROT_VECT_UPDATE_RATE_MS  10      // Time between sensor readings
 #define BNO080_LIN_ACCEL_UPDATE_RATE_MS 10      // 100 Hz
+#define BNO080_DRAIN_MAX_REPORTS        8       // per-tick cap on the FIFO drain:
+                                                // steady state is ~2 reports/tick
+                                                // (rotation + lin accel @ 100 Hz);
+                                                // the cap keeps a burst from
+                                                // starving the notify cadence
 #define BNO080_STEP_CNT_UPDATE_RATE_MS  32      // 31.25 Hz lt. datasheet
 
 /*
