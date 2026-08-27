@@ -1552,7 +1552,9 @@ void setupBNO080()
   // bno080.enableRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
   // bno080.enableGameRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
 
-  bno080.enableAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);
+  // Only the linear accelerometer is consumed (getLinAccelZ for step
+  // detection); the raw accelerometer report would be a third 100 Hz report
+  // stream competing for the same I2C drain budget.
   bno080.enableLinearAccelerometer(BNO080_LIN_ACCEL_UPDATE_RATE_MS);
   // bno080.enableStepCounter(20);   // Thomas: Funktioniert sehr schlecht..
 
