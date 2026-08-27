@@ -19,7 +19,6 @@
 #include <BLE2902.h>
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 #include <SparkFun_BNO080_Arduino_Library.h>
-#include <utility/imumaths.h>
 #include <sdkconfig.h>
 #include <esp_system.h> // esp_reset_reason()
 #include <RTKRoverConfig.h>
@@ -58,39 +57,6 @@ static String getBleName()
     return String(kBleName);
   return getDeviceName(DEVICE_TYPE);
 }
-
-class MyCharacteristicCallbacks: public BLECharacteristicCallbacks
-{
-  void onWrite(BLECharacteristic *pHeadtrackerCharacteristic)
-  {
-    std::string value = pHeadtrackerCharacteristic->getValue(); // Here I get the commands from the App (client)
-
-    if (value.length() > 0)
-    {
-      DBG.println(F("*********"));
-      DBG.print(F("New value: "));
-      for (int i = 0; i < value.length(); i++)
-          DBG.print(value[i]);
-
-      DBG.println();
-      DBG.println(F("*********"));
-    }
-  }
-
-  void onConnect(BLEServer* pServer)
-  {
-    bleConnected = true;
-    DBG.print(F("bleConnected: "));
-    DBG.println(bleConnected);
-  };
-
-  void onDisconnect(BLEServer* pServer)
-  {
-    bleConnected = false;
-    DBG.print(("bleConnected: "));
-    DBG.println(bleConnected);
-  }
-};
 
 // Task handles, for the debug-build stack watermark report in loop().
 static TaskHandle_t hTaskCorrData = NULL;
@@ -1489,10 +1455,7 @@ void setupBLE(void)
   BLEService *pService = pServer->createService(SERVICE_UUID);
   // Create characteristics
   pHeadtrackerCharacteristic = pService->createCharacteristic(
-    HEADTRACKER_CHARACTERISTIC_UUID,
-    // BLECharacteristic::PROPERTY_READ   |
-    // BLECharacteristic::PROPERTY_WRITE  |
-    // BLECharacteristic::PROPERTY_INDICATE |
+    HEADTRACKER_BIN_CHARACTERISTIC_UUID,
     BLECharacteristic::PROPERTY_NOTIFY  // We only use notify characteristic (fastest -> no response)
   );
 
@@ -1505,8 +1468,6 @@ void setupBLE(void)
   );
 
   pHeadtrackerCharacteristic->addDescriptor(new BLE2902());
-  pHeadtrackerCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
-  pHeadtrackerCharacteristic->setValue(deviceName.c_str());
 
   pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
   // pRealtimeKinematicsCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
@@ -1638,6 +1599,31 @@ void task_send_rtk_position_via_ble(void *pvParameters)
   vTaskDelete(NULL);
 }
 
+// Binary heading frame on HEADTRACKER_BIN_CHARACTERISTIC_UUID
+// (cross-repo contract with rwa-player and rwa-creator):
+// little-endian, quaternion components of the ARVR-stabilized
+// rotation vector in Q14 (unit-length, so +/-1.0 -> +/-16384), linear
+// acceleration z in cm/s^2. seq restarts every boot, like dev_seq.
+typedef struct __attribute__((packed))
+{
+  uint16_t seq;
+  uint32_t t_dev_ms;
+  int16_t qi;
+  int16_t qj;
+  int16_t qk;
+  int16_t qw;
+  int16_t linAccelZ_cms2;
+} heading_frame_t;
+static_assert(sizeof(heading_frame_t) == 16, "heading frame is a 16-byte wire contract");
+
+static inline int16_t headingScaledInt16(float v, float scale)
+{
+  float scaled = v * scale;
+  if (scaled > 32767.0f) scaled = 32767.0f;
+  if (scaled < -32768.0f) scaled = -32768.0f;
+  return (int16_t)lroundf(scaled);
+}
+
 void task_bno_orientation_via_ble(void *pvParameters)
 {
   (void)pvParameters;
@@ -1665,11 +1651,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
   uint32_t bnoLastRead_us = 0, bnoLastStats_ms = millis();
 #endif
 
-  float quatI, quatJ, quatK, quatReal, yawDegreeF, pitchDegreeF, linAccelZF;// rollDegreeF;
-  int pitchDegree, yawDegree;// rollDegree;
-  String dataStr((char *)0);
-  // String size: (yaw: 3, delimiter: 1, pitch: 3, delimiter: 1, linAccelZF: 4) = 12 + LIN_ACCEL_Z_DECIMAL_DIGITS
-  dataStr.reserve(12 + LIN_ACCEL_Z_DECIMAL_DIGITS);
+  heading_frame_t headingFrame = {};
 
   // Measure stack size
   UBaseType_t uxHighWaterMark;
@@ -1729,35 +1711,16 @@ void task_bno_orientation_via_ble(void *pvParameters)
       if (drained > 0)
       {
         imuSampleCount++;
-        quatI = bno080.getQuatI();
-        quatJ = bno080.getQuatJ();
-        quatK = bno080.getQuatK();
-        quatReal = bno080.getQuatReal();
-
-        imu::Quaternion quat = imu::Quaternion(quatReal, quatI, quatJ, quatK);
-        quat.normalize();
-        imu::Vector<3> q_to_euler = quat.toEuler();
-        yawDegreeF = q_to_euler.x();
-        yawDegreeF = yawDegreeF * -180.0 / M_PI;   // conversion to Degree
-
-        if ( yawDegreeF < 0 ) yawDegreeF += 359.0; // convert negative to positive angles
-
-        yawDegree = (int)(round(yawDegreeF));
-
-        pitchDegreeF = q_to_euler.z();
-        pitchDegreeF = pitchDegreeF * -180.0 / M_PI;
-        pitchDegree = (int)(round(pitchDegreeF));
-
-        // rollDegreeF = q_to_euler.y();
-        // rollDegreeF = rollDegreeF * -180.0 / M_PI;
-        // rollDegree = (int)(round(rollDegreeF));
-
-        // Seems to be much slower than bno080.getAccelZ()
-        linAccelZF = bno080.getLinAccelZ();
-
-        dataStr = String(yawDegree) + DATA_STR_DELIMITER + String(pitchDegree) \
-                + DATA_STR_DELIMITER + String(linAccelZF, LIN_ACCEL_Z_DECIMAL_DIGITS);
-        pHeadtrackerCharacteristic->setValue(dataStr.c_str());
+        // Raw quaternion on the wire; the apps do the (identical, spec'd)
+        // quat->azimuth/elevation math on their hardware FPUs.
+        headingFrame.seq++;
+        headingFrame.t_dev_ms = millis();
+        headingFrame.qi = headingScaledInt16(bno080.getQuatI(), 16384.0f);
+        headingFrame.qj = headingScaledInt16(bno080.getQuatJ(), 16384.0f);
+        headingFrame.qk = headingScaledInt16(bno080.getQuatK(), 16384.0f);
+        headingFrame.qw = headingScaledInt16(bno080.getQuatReal(), 16384.0f);
+        headingFrame.linAccelZ_cms2 = headingScaledInt16(bno080.getLinAccelZ(), 100.0f);
+        pHeadtrackerCharacteristic->setValue((uint8_t *)&headingFrame, sizeof(headingFrame));
         pHeadtrackerCharacteristic->notify();
       }
       }

@@ -100,13 +100,15 @@
 */
 #define PAYLOAD_BUF_LEN              20
 #define SERVICE_UUID                            "713D0000-503E-4C75-BA94-3148F18D941E"
-#define HEADTRACKER_CHARACTERISTIC_UUID         "713D0002-503E-4C75-BA94-3148F18D941E"
+// Binary heading frame:
+// ..0002 is the RWAHT firmware's legacy ASCII heading (this firmware no longer has it);
+// ..0003 was historically assigned as TRACKERSERVICERX in the apps. Neither may be reused.
+#define HEADTRACKER_BIN_CHARACTERISTIC_UUID     "713D0005-503E-4C75-BA94-3148F18D941E"
 #define REALTIME_KINEMATICS_CHARACTERISTIC_UUID "713D0004-503E-4C75-BA94-3148F18D941E"
 // Telemetry GATT service (PROJECT-PLAN.md par. 5.1) — cross-repo contract
 #define TELEMETRY_SERVICE_UUID                  "713D0100-503E-4C75-BA94-3148F18D941E"
 #define TELEMETRY_TX_CHARACTERISTIC_UUID        "713D0101-503E-4C75-BA94-3148F18D941E"
 #define TELEMETRY_CTRL_CHARACTERISTIC_UUID      "713D0102-503E-4C75-BA94-3148F18D941E"
-#define LIN_ACCEL_Z_DECIMAL_DIGITS   2
 #define DATA_STR_DELIMITER           " "
 
 /*
@@ -157,7 +159,9 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define TASK_TELEMETRY_PRIORITY                         1     // Lowest in the system: telemetry may starve, never compete (PROJECT-PLAN.md par. 5)
 #define TASK_RTK_BLE_INTERVAL_MS                      100    // Send position to iPhone
 #define TASK_RTK_GET_POSITION_INTERVAL_MS             100
-#define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       12
+#define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       10  // match BNO080_ROT_VECT_UPDATE_RATE_MS:
+                                                           // a slower tick than the report rate
+                                                           // grows the sensor-side FIFO backlog
 #define TASK_WIFI_RTK_DATA_INTERVAL_MS               1000  //200 Get fresh correction data from caster
 #define MIN_ACCEPTABLE_ACCURACY_MM                   8000  // Device will only send if accuray is better than this
 #define NAVIGATION_FREQUENCY_HZ                        10  // Solution output rate. 20 Hz is beyond the
