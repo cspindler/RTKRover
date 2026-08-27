@@ -1482,8 +1482,17 @@ void setupBLE(void)
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x12);  // 0x06 x 1.25 ms = 7.5 ms, functions that help with iPhone connections issue
-  pAdvertising->setMaxPreferred(0x24);  // 30 ms
+  // Advertised connection-interval preference, units of 1.25 ms.
+  // Only a hint - iOS chooses the actual interval.
+  //
+  // Don't request a faster interval via esp_ble_gap_update_conn_params:
+  // a granted 15-30 ms request starved the WiFi side through radio coex
+  // and killed the NTRIP stream completely. The head-tracking
+  // cost of the default interval is small: notifies queue in the controller
+  // and flush together each connection event, so the newest frame still
+  // arrives every event.
+  pAdvertising->setMinPreferred(0x12);  // 22.5 ms
+  pAdvertising->setMaxPreferred(0x24);  // 45 ms
   //pAdvertising->start();
   BLEDevice::startAdvertising();
   DBG.println(F("Characteristic defined! Now you can read it in your phone!"));
