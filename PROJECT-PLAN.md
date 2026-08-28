@@ -311,21 +311,27 @@ Tracker service (`713D0000-...`), all notify-only:
 
 | | UUID | |
 | --- | --- | --- |
-| Heading, binary (§5.5) | `713D0005-503E-4C75-BA94-3148F18D941E` | rtk-rover ≥ 0.46.0 |
-| Heading, ASCII (legacy) | `713D0002-503E-4C75-BA94-3148F18D941E` | RWAHT only; rtk-rover ≤ 0.45.x |
+| Heading, binary (§5.5) | `713D0005-503E-4C75-BA94-3148F18D941E` | rtk-rover >= 0.46.0; RWAHT ≥ 0.3.0 |
+| Heading, ASCII (legacy) | `713D0002-503E-4C75-BA94-3148F18D941E` | RWAHT (all versions); rtk-rover <= 0.45.x |
 | Raw position | `713D0004-503E-4C75-BA94-3148F18D941E` | rtk-rover |
 | *(reserved)* | `713D0003-503E-4C75-BA94-3148F18D941E` | historic `TRACKERSERVICERX`, never reuse |
 
-The telemetry service is **not advertised**: the 31-byte advertisement is already full with the
-tracker service UUID. The app connects on the tracker service as before and discovers telemetry
-afterwards. This is also how the app tells the two assembly kinds apart: the plain headtracker
-(RWAHT) exposes only the tracker service with `713D0002`; the RTK headtracker additionally
-exposes the binary heading characteristic `713D0005`, the raw position characteristic
-`713D0004` and the telemetry service. The apps pick the heading decoder **per characteristic**:
-binary frames on `713D0005` when it exists, the ASCII format on `713D0002` otherwise
-(RWAHT fallback). An rtk-rover ≥ 0.46.0 assembly emits **no** ASCII heading at all, so apps
-older than the `713D0005` decoder get no heading from it — fleet firmware and apps ship
-together.
+The telemetry service is **not advertised**: the 31-byte advertisement is
+already full with the tracker service UUID. The app connects on the tracker
+service as before and discovers telemetry afterwards. The app tells the two
+assembly kinds apart by the RTK-only attributes: the RTK headtracker exposes the
+raw position characteristic `713D0004` and the telemetry service, the plain
+headtracker (RWAHT) does not. (Before RWAHT 0.3.0 the binary heading
+characteristic `713D0005` was RTK-only too; since RWAHT 0.3.0 both kinds expose
+it, so `713D0005` presence must not be used for kind detection.) The apps pick
+the heading decoder per characteristic: binary frames on `713D0005` when it
+exists, the ASCII format on `713D0002` otherwise (pre-0.3.0 RWAHT fallback). An
+rtk-rover >= 0.46.0 assembly emits no ASCII heading, so apps older than the
+`713D0005` decoder get no heading from it. RWAHT >= 0.3.0 instead keeps both
+characteristics and selects one active path per connectio* by the client's
+notify subscription (CCCD): a subscription on `713D0005` silences the ASCII
+path; with only `713D0002` subscribed (or none) the ASCII path runs, so older
+clients keep working unchanged. Subscriptions reset on disconnect.
 
 ### 5.2 Framing details
 
@@ -410,13 +416,18 @@ asked for on demand — the app waits for the next state change, or the next 60 
 If the Diagnostics tab ever needs a complete snapshot on demand, that is a firmware change,
 not an app one. (The app does not write CTRL today.)
 
-### 5.5 Binary heading frame (`713D0005`, rtk-rover ≥ 0.46.0)
+### 5.5 Binary heading frame (`713D0005`, rtk-rover ≥ 0.46.0, RWAHT >= 0.3.0)
 
 One notification = one frame = **16 bytes, little-endian, packed** (fits the 20 B
 default-MTU notify payload; no reassembly, no length prefix). ~100 Hz while a
-central is connected. This is a cross-repo contract: encoder in `rtk-rover`
-`src/main.cpp` (`heading_frame_t`), decoders in `rwa-player`
+central is connected (RWAHT: while subscribed, §5.1). This is a cross-repo contract:
+encoders in `rtk-rover` `src/main.cpp` and `rwa-headtracker` `rwaht/rwaht.ino`
+(`heading_frame_t` in both), decoders in `rwa-player`
 (`HeadtrackerManager.swift`) and `rwa-creator` (`bluetooth/devicehandler.cpp`).
+Consumers that need rotation speed derive it as delta angle / delta `t_dev_ms` from
+consecutive frames, not from an assumed sample interval, which differs
+between the binary path (100 Hz) and the legacy ASCII path (connection-interval
+dependent, ~50–66 Hz).
 
 | offset | field | type | meaning |
 | --- | --- | --- | --- |
@@ -534,3 +545,4 @@ Operations: nightly `pg_dump` to S3 (host cron + `scripts/backup.sh`), disk-usag
 | 2026-08 | §4–5 re-checked against shipped firmware 0.44.3 | key tables matched exactly; the prose had drifted (status_dump scope, imu_status cadence, frame splitting, error codes, advertising) |
 | 2026-08 | Reduced positioning reporting frequency to 10 Hz | reduce I2C load on ZED-F9P |
 | 2026-08 | Binary heading frame on `713D0005` (§5.5), rtk-rover 0.46.0; `713D0002` ASCII heading frozen as RWAHT-only | head-tracking latency: the ASCII path quantized to integer degrees, carried no seq/timestamp, and rode on a sensor FIFO that delivered stale oldest-first samples; no dual-emit, so fleet firmware and apps ship together |
+| 2026-08 | RWAHT 0.3.0 adopts the `713D0005` binary frame alongside the legacy `713D0002`, one active path per connection selected by CCCD subscription (binary wins) | RWAHT serves clients outside the fleet-shipping cycle (RWA Monitor, pd-based projects), so unlike rtk-rover it keeps the ASCII path for unmodified clients; subscription selection means the inactive path costs nothing. Kind detection must key on `713D0004`/telemetry, no longer on `713D0005` presence |
