@@ -26,6 +26,7 @@
 #include <CasterSecrets.h>
 #include <battery.h>
 #include <handle_wifi.h>
+#include <WiFiUdp.h> // hotspot path warmer (warmHotspotPath)
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
 #include <TestsRTKRover.h>
@@ -688,6 +689,73 @@ void updatePosition()
   }
 }
 
+// Hotspot path warmer (see HOTSPOT_WARM_INTERVAL_MS in RTKRoverConfig.h for
+// the doze doom loop this breaks). Sends one minimal DNS A query for the
+// caster host to the hotspot's DNS server every interval. Deliberately NOT
+// WiFi.hostByName(): that goes through lwIP's DNS cache, which answers a
+// repeated name locally — no packet on the wire — until the record's TTL
+// expires, so it cannot hold a cadence. A hand-built query always transmits,
+// and the reply coming back keeps the NAT entry fresh too. Fire-and-forget:
+// the exchange is the point, the answer is never parsed (the phone's DNS
+// proxy resolving it upstream is the pre-warming side effect). Rate-limits
+// itself, so call sites may invoke it every iteration. No-op unless WiFi is
+// associated; callers guarantee the caster is disconnected.
+static void warmHotspotPath(const char *host)
+{
+  static uint32_t lastWarm_ms = 0;
+  static WiFiUDP warmUdp;
+  static bool warmUdpReady = false;
+  static uint16_t warmQueryId = 0;
+
+  if (!WiFi.isConnected()) return;
+  if (millis() - lastWarm_ms < HOTSPOT_WARM_INTERVAL_MS) return;
+  lastWarm_ms = millis();
+
+  if (!warmUdpReady) warmUdpReady = warmUdp.begin(0) != 0;  // ephemeral port
+  if (!warmUdpReady) return;
+
+  // Discard the previous warm's reply (never parsed, see above).
+  while (warmUdp.parsePacket() > 0) warmUdp.flush();
+
+  IPAddress dnsServer = WiFi.dnsIP();
+  if (dnsServer == IPAddress()) return;
+
+  // DNS header: id, RD flag, one question.
+  uint8_t query[12 + 260];
+  size_t len = 0;
+  warmQueryId++;
+  query[len++] = warmQueryId >> 8;
+  query[len++] = warmQueryId & 0xFF;
+  query[len++] = 0x01;  // flags: recursion desired
+  query[len++] = 0x00;
+  query[len++] = 0x00;  // QDCOUNT = 1
+  query[len++] = 0x01;
+  memset(query + len, 0, 6);  // AN/NS/ARCOUNT = 0
+  len += 6;
+  // QNAME: dotted host as length-prefixed labels
+  for (const char *p = host; *p != '\0'; )
+  {
+    const char *dot = strchr(p, '.');
+    size_t label = dot ? (size_t)(dot - p) : strlen(p);
+    if (label == 0 || label > 63 || len + label + 1 + 5 > sizeof(query)) return;
+    query[len++] = (uint8_t)label;
+    memcpy(query + len, p, label);
+    len += label;
+    p += label + (dot ? 1 : 0);
+  }
+  query[len++] = 0x00;  // root label
+  query[len++] = 0x00;  // QTYPE = A
+  query[len++] = 0x01;
+  query[len++] = 0x00;  // QCLASS = IN
+  query[len++] = 0x01;
+
+  warmUdp.beginPacket(dnsServer, 53);
+  warmUdp.write(query, len);
+  bool sent = warmUdp.endPacket() != 0;
+  DBG.printf("hotspot path warmer: DNS query for %s -> %s\n",
+             host, sent ? "sent" : "send failed");
+}
+
 /*
 =================================================================================
                                 FreeRTOS
@@ -959,6 +1027,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         lastGgaHeard_ms = millis();
       }
 
+      // WiFi associated, caster disconnected: keep the hotspot's upstream
+      // path awake — nothing else is generating traffic in this state, and
+      // the gates below can hold us here for minutes. (Self rate-limited.)
+      warmHotspotPath(casterHost.c_str());
+
       // Receiver-liveness gate: a mute F9P produces no GGA, and the VRS
       // streams nothing without one. Connecting would only cycle dataless
       // sessions against the caster (~93 s cycle observed, bench 4.1). The
@@ -1000,7 +1073,17 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (attemptDelay_ms > 0)
       {
         DBG.printf("NTRIP backoff: waiting %u ms before reconnect\n", attemptDelay_ms);
-        vTaskDelay(attemptDelay_ms/portTICK_PERIOD_MS);
+        // Sliced sleep: the warmer must keep its cadence through this wait
+        // (up to NTRIP_BACKOFF_MAX_MS in one go) — these gaps are exactly
+        // where the hotspot dozes off.
+        uint32_t waited_ms = 0;
+        while (waited_ms < attemptDelay_ms)
+        {
+          uint32_t slice_ms = min(attemptDelay_ms - waited_ms, (uint32_t)1000);
+          vTaskDelay(slice_ms/portTICK_PERIOD_MS);
+          waited_ms += slice_ms;
+          warmHotspotPath(casterHost.c_str());
+        }
         attemptDelay_ms = 0;
         iterStart_ms = millis();  // deliberate pacing, not a pipeline stall
       }

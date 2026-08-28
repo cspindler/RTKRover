@@ -213,6 +213,20 @@ the post-connect grace window, reconnect backoff, and bounded mutex takes.
 #define WIFI_REINIT_AFTER_MS       300000  // full driver re-init only after this
                                            // long without association (wedged-
                                            // driver escape hatch)
+
+// Hotspot path warmer (diagnosed 2026-08-28, rwa-hs-1): iOS Personal Hotspot
+// idles its upstream cellular data session when clients go quiet. During a
+// caster outage the reconnect backoff leaves 5-60 s quiet gaps, the hotspot
+// dozes deeper, TCP SYNs to the caster then fail, and the backoff grows —
+// a self-sustaining doom loop (with the path proven alive the same minute,
+// the same unit streamed 150 RTCM msgs/180 s; while dozed, near-all connects
+// failed at -51 dBm RSSI with caster and account healthy). While WiFi is
+// associated and the caster is disconnected, a small DNS query of the caster
+// host every interval keeps the hotspot NAT/cellular context awake (and
+// pre-warms DNS). The RTCM stream itself keeps the path awake, so no warmer
+// runs while connected — and the warmer never touches the caster: refnet
+// throttles reconnect floods, the backoff etiquette must stay.
+#define HOTSPOT_WARM_INTERVAL_MS    15000  // path-warmer cadence while caster-disconnected
 /*
 The module supports RTK update frequencies ranging from 8 Hz (BeiDou, Galileo, GLONASS, GPS) to
 20 Hz (GPS only), velocity and dynamic heading accuracies of 0.05 m/s and 0.3° respectively and a
