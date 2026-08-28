@@ -9,6 +9,44 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+[0.46.0] - 2026-08-28
+
+### Changed
+
+- Binary head-orientation frames (breaking): heading now streams as a 16-byte
+  quaternion frame on a new characteristic (`713D0005-...`) instead of ASCII
+  integer degrees on `713D0002`: floating point precision plus a frame counter
+  and device timestamp for drop/latency monitoring. The ASCII characteristic is
+  gone from this firmware (it remains the plain RWAHT headtracker's format).
+  Needs the matching rwa-player / rwa-creator decoders: fleet firmware and apps
+  ship together. Spec: PROJECT-PLAN.md §5.5.
+
+- Head tracking samples fresh at the sensor rate: the IMU FIFO is drained to the
+  newest report every 10 ms tick. Previously one report was consumed per 12 ms
+  (and a second one read and thrown away), so the sensor's queue backed up and
+  delivered stale orientation: measured ~34 Hz stale, now 75 Hz fresh.
+  Supporting changes: head-tracking task at highest priority, IMU I2C at 400
+  kHz, unused raw-accelerometer report disabled.
+
+- No BLE connection-interval request, decided by measurement: asking the phone
+  for 15–30 ms starved WiFi through radio coexistence and killed the NTRIP
+  stream. The interval stays the iOS central's choice; `setupBLE()` documents
+  the edge.
+
+### Added
+
+- Hotspot path warmer: while WiFi is associated but the caster is
+  disconnected, a minimal DNS query every 15 s keeps the phone hotspot's
+  cellular path awake. iOS might let it doze during the reconnect backoff's quiet
+  phases, which might fail the next connect, pushing the backoff furher
+  (self-sustaining outage).
+- Per-second IMU poll/consume statistics in debug builds (backlog, misses,
+  I2C read cost), instrumentation for verification of the latency fixes.
+
+### Fixed
+
+- A single missed IMU poll no longer freezes head tracking for a full second.
+
 ## [0.45.1] - 2026-08-26
 
 ### Changed
