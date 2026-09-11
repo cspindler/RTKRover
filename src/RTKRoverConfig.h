@@ -161,10 +161,8 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define TASK_BNO080_VIA_BLE_PRIORITY                    3     // Headtracking: highest priority for believalbe binaural rendering
                                                               // (above the RTK tasks. A tie means round-robin time slicing,
                                                               // i.e. scheduling jitter on the notify cadence)
-#define TASK_RTK_POSITION_VIA_BLE_PRIORITY              2     // Real Time Kinematics data to iOS app, (should not break head tracking)
 #define TASK_TELEMETRY_PRIORITY                         1     // Lowest in the system: telemetry may starve, never compete (PROJECT-PLAN.md par. 5)
-#define TASK_RTK_BLE_INTERVAL_MS                      100    // Send position to iPhone
-#define TASK_RTK_GET_POSITION_INTERVAL_MS             100
+#define TASK_RTK_GET_POSITION_INTERVAL_MS             100  // position read + 713D0004 notify
 #define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       10  // match BNO080_ROT_VECT_UPDATE_RATE_MS:
                                                            // a slower tick than the report rate
                                                            // grows the sensor-side FIFO backlog

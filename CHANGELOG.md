@@ -68,6 +68,21 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   - `blinkOneTime()` / `ledInit()` moved to `src/led.{h,cpp}` so the WiFi module
     can blink its 1.0 s / 0.1 s code without reaching into `main.cpp`.
 
+- **One task for the position pipeline.** `task_rtk_get_rover_position` now
+  notifies the `713D0004` line itself, after releasing `mutexSem`:
+  `updatePosition()` returns the coordinate when the solution is fresh and
+  within `MIN_ACCEPTABLE_ACCURACY_MM`, and the task formats and notifies it.
+  `task_send_rtk_position_via_ble`, the 2-deep `xQueueCoord` and the task's
+  4 KB stack are gone, and with them the 100 ms producer/consumer phase offset
+  (up to one period of added latency on the position stream). `notify()` only
+  posts to the BT task, so calling it from core 0 is fine; the telemetry drain
+  already notified from a third task. The "waiting for a phone" 0.1 s blink
+  moved to the Arduino `loop()`, which otherwise sleeps 100 ms instead of
+  spinning. Bench on rwa-hs-1 with the phone connected: position lines at the
+  same 8–9/s as before the merge, position-task stack watermark 2.0 KB of 4 KB.
+  `TASK_RTK_BLE_INTERVAL_MS` and `TASK_RTK_POSITION_VIA_BLE_PRIORITY` removed
+  from the config header.
+
 ## [Unreleased - lean pass part 1]
 
 ### Changed

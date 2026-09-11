@@ -127,12 +127,10 @@ hotspot was up", not only "lost it".
 * while wait for WiFi Connection
   * 1.0s, 0.1s: connection to AP lost (blocking)
 
-`task_send_rtk_position_via_ble`
+Arduino `loop()`
 
-* while (!bleConnected)
-  * 0.1s (non-blocking)
-* when not connected in while-loop
-  * 3x 0.1s, 1.0s wait
+* while no BLE central is connected
+  * 0.1s on / 0.1s off (non-blocking); stops as soon as the phone connects
 
 ### ESP32 board (yellow) LED codes
 

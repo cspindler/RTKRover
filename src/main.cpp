@@ -51,7 +51,6 @@ static String getBleName()
 static TaskHandle_t hTaskCorrData = NULL;
 static TaskHandle_t hTaskPosition = NULL;
 static TaskHandle_t hTaskBnoBle = NULL;
-static TaskHandle_t hTaskRtkBle = NULL;
 
 // Heap diagnostics (debug builds): connect time is the critical moment —
 // Bluedroid allocates the GATT connection control block on the BT task, and
@@ -122,6 +121,16 @@ void setupBNO080(void);
 
 SFE_UBLOX_GNSS myGNSS;
 
+// High-precision coordinate: UBX 1e-7 deg + 1e-9 high-res part, the units
+// the 713D0004 line carries.
+typedef struct Coord
+{
+  int32_t lat;
+  int8_t  latHp;
+  int32_t lon;
+  int8_t  lonHp;
+} coord_t;
+
 /**
  * @brief Setup the ZED-F9D to a rover
  *
@@ -131,26 +140,19 @@ SFE_UBLOX_GNSS myGNSS;
 bool setupGNSS(void);
 
 /**
- * @brief Get the Position
+ * @brief One position-pipeline pass under mutexSem: reads the streamed NAV
+ * packets, emits the 1 Hz gnss_fix event, and returns the coordinate to
+ * stream when the solution is fresh and within MIN_ACCEPTABLE_ACCURACY_MM.
  *
+ * @return true if *out holds a position the walk may trust
  */
-void updatePosition(void);
+static bool updatePosition(coord_t *out);
 
 /*
 =================================================================================
                                 FreeRTOS
 =================================================================================
 */
-typedef struct Coord
-{
-  int32_t lat;
-  int8_t  latHp;
-  int32_t lon;
-  int8_t  lonHp;
-} coord_t;
-
-const uint8_t QUEUE_SIZE = 2;
-xQueueHandle xQueueCoord;
 static xSemaphoreHandle mutexSem;
 
 /**
@@ -162,19 +164,12 @@ static xSemaphoreHandle mutexSem;
 void task_rtk_get_corrrection_data(void *pvParameters);
 
 /**
- * @brief Task to get location data
- *
- * @param pvParameters
- */
-
-void task_rtk_get_rover_position(void *pvParameters);
-/**
- * @brief Task for sending the corrected location data to the
- *        iPhone using BLE
+ * @brief Task for the position pipeline: updatePosition() under the mutex,
+ *        then the ASCII position to the iPhone on 713D0004
  *
  * @param pvParameters Void pointer, no parameter used here
  */
-void task_send_rtk_position_via_ble(void *pvParameters);
+void task_rtk_get_rover_position(void *pvParameters);
 
 /**
  * @brief Task for sending the BNO080 position data to the
@@ -183,12 +178,6 @@ void task_send_rtk_position_via_ble(void *pvParameters);
  * @param pvParameters Void pointer, no parameter used here
  */
 void task_bno_orientation_via_ble(void *pvParameters);
-
-/**
- * @brief Create the queues with the right size
- *
- */
-void xQueueSetup(void);
 
 /**
  * @brief Report why the chip last reset. Abnormal causes (brownout, panic,
@@ -293,25 +282,23 @@ void setup()
 
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
-  xQueueSetup();
   /*
-  Sizes from the 2026-07-29 watermark measurement (debug loop() prints
-  "stack min free" every 10 s = bytes of stack never touched). Kept margin is
-  ~2 KB over observed peak use; the FreeRTOS stack canary turns an undersized
-  stack into a loud "Stack canary watchpoint triggered" panic on the bench,
-  not silent corruption. Total 21 KB, down from 35 KB - the freed 14 KB of
+  Sizes from the watermark measurements (debug loop() prints "stack min free"
+  every 10 s = bytes of stack never touched). Kept margin is ~2 KB over
+  observed peak use; the FreeRTOS stack canary turns an undersized stack into
+  a loud "Stack canary watchpoint triggered" panic on the bench, not silent
+  corruption. 2026-07-29: total 21 KB, down from 35 KB - the freed 14 KB of
   heap is what ended the connect-time OOM panics (vQueueDelete assert /
-  lock_init_generic abort).
+  lock_init_generic abort). 2026-09-11: 17 KB, the position sender task and
+  its queue merged into the position task.
   */
-  int stack_size_task_rtk_get_corrrection_data = 1024 * 9;       // min free was 280 of 7168 (!) — grown, was nearly overflowing
-  int stack_size_task_rtk_get_rover_position = 1024 * 4;         // min free was 5824 of 7168
-  int stack_size_task_bno_orientation_via_ble = 1024 * 4;        // min free was 9160 of 11264
-  int stack_size_task_send_rtk_position_via_ble = 1024 * 4;      // min free was 8224 of 10240
+  int stack_size_task_rtk_get_corrrection_data = 1024 * 9;       // min free 2792 (2026-09-11)
+  int stack_size_task_rtk_get_rover_position = 1024 * 4;         // min free 2344 before the merge; notify() added
+  int stack_size_task_bno_orientation_via_ble = 1024 * 4;        // min free 2080
 
   xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, &hTaskCorrData, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, &hTaskPosition, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, &hTaskBnoBle, RUNNING_CORE_1);
-  xTaskCreatePinnedToCore( &task_send_rtk_position_via_ble, "task_send_rtk_position_via_ble", stack_size_task_send_rtk_position_via_ble, NULL, TASK_RTK_POSITION_VIA_BLE_PRIORITY, &hTaskRtkBle, RUNNING_CORE_1);
 
   // (Telemetry drain task is started right after setupBLE() above, so sensor
   // failures during setup are already visible in diagnostics.)
@@ -324,6 +311,12 @@ void setup()
 
 void loop()
 {
+  // "Waiting for a phone" blink code (README.md): 0.1 s on / 0.1 s off while
+  // no BLE central is connected. Otherwise idle; the delay keeps loopTask
+  // from spinning at priority 1 against the telemetry drain.
+  if (!bleLinkConnected()) blinkOneTime(100, true);
+  else vTaskDelay(100/portTICK_PERIOD_MS);
+
   #if DEBUGGING
   aunit::TestRunner::run();
 
@@ -335,11 +328,10 @@ void loop()
   {
     lastMemReport = millis();
     logFreeHeap("loop");
-    DBG.printf("stack min free: corr %u, pos %u, bno %u, rtkble %u, telem %u, loop %u\n",
+    DBG.printf("stack min free: corr %u, pos %u, bno %u, telem %u, loop %u\n",
                hTaskCorrData ? uxTaskGetStackHighWaterMark(hTaskCorrData) : 0,
                hTaskPosition ? uxTaskGetStackHighWaterMark(hTaskPosition) : 0,
                hTaskBnoBle ? uxTaskGetStackHighWaterMark(hTaskBnoBle) : 0,
-               hTaskRtkBle ? uxTaskGetStackHighWaterMark(hTaskRtkBle) : 0,
                telemetryBleTaskHandle() ? uxTaskGetStackHighWaterMark(telemetryBleTaskHandle()) : 0,
                uxTaskGetStackHighWaterMark(NULL));
   }
@@ -618,7 +610,7 @@ static bool gnssRecoveryTick()
   return true;
 }
 
-void updatePosition()
+static bool updatePosition(coord_t *out)
 {
   coord_t coord = {0, 0, 0, 0};  // written only under llhFresh below
 
@@ -646,27 +638,16 @@ void updatePosition()
 
     coord = {.lat = lat, .latHp = latHp, .lon = lon, .lonHp = lonHp};
   }
-  // Only stream positions the walk may trust: MIN_ACCEPTABLE_ACCURACY_MM
-  // was documented in the config but never enforced. When accuracy
-  // degrades past it (or the receiver stops producing solutions and there
-  // is nothing fresh to send) the position stream simply goes quiet,
-  // ubloxUpdatedAt on the phone goes stale, and the app falls back to
-  // internal GPS after its freshness window. Degraded RTK and lost
-  // RTK use the same fallback.
-  if (llhFresh && accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM)
-  {
-    // Never block here: this runs holding mutexSem, and with no BLE central
-    // draining the queue a portMAX_DELAY send wedged the whole GNSS
-    // pipeline (position task blocks holding the mutex -> NTRIP task can't
-    // pushRawData -> corrections stop; measured 43 s stalls, 2026-07-29).
-    // Latest position wins: on a full queue, drop the oldest and retry.
-    if (xQueueSend(xQueueCoord, &coord, 0) != pdPASS)
-    {
-      coord_t discard;
-      xQueueReceive(xQueueCoord, &discard, 0);
-      xQueueSend(xQueueCoord, &coord, 0);
-    }
-  }
+  // Only stream positions the walk may trust (MIN_ACCEPTABLE_ACCURACY_MM).
+  // When accuracy degrades past it (or the receiver stops producing
+  // solutions and there is nothing fresh to send) the position stream simply
+  // goes quiet, ubloxUpdatedAt on the phone goes stale, and the app falls
+  // back to internal GPS after its freshness window. Degraded RTK and lost
+  // RTK use the same fallback. The caller notifies after releasing the
+  // mutex: nothing here may block (a blocking queue send from under the
+  // mutex wedged the whole GNSS pipeline for 43 s, 2026-07-29).
+  const bool trusted = llhFresh && accuracy > 0 && accuracy <= MIN_ACCEPTABLE_ACCURACY_MM;
+  if (trusted) *out = coord;
 
   // 1 Hz gnss_fix telemetry sample (PROJECT-PLAN.md par. 4.3, the dead-zone
   // dataset). Emitted only when a fresh solution actually arrived: every
@@ -710,6 +691,7 @@ void updatePosition()
       telemetryEmitError(1, "gnss_pipe_stall", msg);
     }
   }
+  return trusted;
 }
 
 // Hotspot path warmer (see HOTSPOT_WARM_INTERVAL_MS in RTKRoverConfig.h for
@@ -789,15 +771,36 @@ void task_rtk_get_rover_position(void *pvParameters)
 {
   (void)pvParameters;
 
+  coord_t coord;
+  // "<lat> <latHp> <lon> <lonHp>", decimal, space-separated (the 713D0004 wire
+  // format). Worst case "-1234567890 -99 -1234567890 -99" = 27 chars + NUL.
+  // Stack buffer, not String: 10 Hz on a heap with a measured 1.8 kB minimum.
+  char latLonStr[32];
+
   while (true)
   {
     telemetryNotePositionLoop();  // heartbeat liveness counter (key 19)
 
+    bool havePosition = false;
     if (xSemaphoreTake(mutexSem, portMAX_DELAY))
     {
-      updatePosition();
-
+      havePosition = updatePosition(&coord);
       xSemaphoreGive(mutexSem);
+    }
+
+    // Notify from here, mutex released: notify() only posts to the BT task,
+    // so core 0 is fine, and the producer/consumer hand-off through a queue
+    // and a second 100 ms task (up to one period of added latency) is gone.
+    if (havePosition && bleLinkConnected())
+    {
+      int n = snprintf(latLonStr, sizeof(latLonStr),
+                       "%ld" DATA_STR_DELIMITER "%d" DATA_STR_DELIMITER
+                       "%ld" DATA_STR_DELIMITER "%d",
+                       (long)coord.lat, (int)coord.latHp,
+                       (long)coord.lon, (int)coord.lonHp);
+      pRealtimeKinematicsCharacteristic->setValue((uint8_t *)latLonStr, (size_t)n);
+      pRealtimeKinematicsCharacteristic->notify();
+      DBG.printf("pos: %s\n", latLonStr);
     }
 
     vTaskDelay(TASK_RTK_GET_POSITION_INTERVAL_MS/portTICK_PERIOD_MS);
@@ -1278,62 +1281,6 @@ void setupBNO080()
 
   // Markus: --> timeBetweenReports should not be 20 ms ;)  try this: 31.25 Hz
   // bno080.enableStepCounter(32);
-}
-
-void xQueueSetup()
-{
-  xQueueCoord  = xQueueCreate( QUEUE_SIZE, sizeof( coord_t ) );
-}
-
-void task_send_rtk_position_via_ble(void *pvParameters)
-{
-  (void)pvParameters;
-
-  coord_t coord;
-  // "<lat> <latHp> <lon> <lonHp>", decimal, space-separated (the 713D0004 wire
-  // format). Worst case "-1234567890 -99 -1234567890 -99" = 27 chars + NUL.
-  // Stack buffer, not String: this ran at 10 Hz on a heap with a measured
-  // 1.8 kB minimum, allocating four temporaries per notification.
-  char latLonStr[32];
-
-  while (!bleLinkConnected()) blinkOneTime(100, true);
-
-  while (true)
-  {
-    if (bleLinkConnected())
-    {
-      if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS)
-      {
-        DBG.print(F("Received coord.lat = "));
-        DBG.print(coord.lat);
-        DBG.print(F(", coord.latHp = "));
-        DBG.print(coord.latHp);
-        DBG.print(F(" coord.lon = "));
-        DBG.print(coord.lon);
-        DBG.print(F(", coord.lonHp = "));
-        DBG.println(coord.lonHp);
-        // Send coords: identical bytes to the previous String concatenation.
-        int n = snprintf(latLonStr, sizeof(latLonStr),
-                         "%ld" DATA_STR_DELIMITER "%d" DATA_STR_DELIMITER
-                         "%ld" DATA_STR_DELIMITER "%d",
-                         (long)coord.lat, (int)coord.latHp,
-                         (long)coord.lon, (int)coord.lonHp);
-        pRealtimeKinematicsCharacteristic->setValue((uint8_t *)latLonStr, (size_t)n);
-        pRealtimeKinematicsCharacteristic->notify();
-      }
-
-    } /*** if (bleLinkConnected()) ends ***/
-    else
-    {
-      blinkOneTime(100, true);
-    }
-
-    vTaskDelay(TASK_RTK_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
-    // taskYIELD();
-  } // while (true) ends
-
-  // Delete self task
-  vTaskDelete(NULL);
 }
 
 // Binary heading frame on HEADTRACKER_BIN_CHARACTERISTIC_UUID
