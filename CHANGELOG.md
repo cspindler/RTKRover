@@ -69,20 +69,23 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
 
 ### Changed
 
-- **BLE connection interval: 15–30 ms requested on every connect**
-  (`ble_link.cpp`, ADR-001 par. 5). The advertised preference moves from
-  22.5–45 ms to 15–30 ms (0x0C–0x18: Apple's floor for a non-HID peripheral
-  and its "max ≥ min + 15 ms" rule), and since iOS treats the preference as
-  a hint, `esp_ble_gap_update_conn_params` asks for the same range from
-  `ESP_GATTS_CONNECT_EVT` (slave latency 0, supervision timeout 4 s). The
-  grant arrives in `ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT`, is logged with its
-  status, and the heading pacing follows it as before: at a 15 ms grant the
-  10 ms sensor tick is the floor, so up to two fresh frames ride each of the
-  ~66 events/s. This retires the 0.46.0 rule "never request a fast
-  interval": it was measured against WiFi coex (0 RTCM in 300 s with the
-  request), and WiFi is gone. Expected (ADR-001 par. 5): mean link latency
-  ~8–12 ms, delivery jitter ~20–25 ms, no beacon-wake tails. The measured
-  grant and rates are in the 0.48.0 bench notes.
+- **BLE connection interval: 15 ms requested on every connect**
+  (`ble_link.cpp`, ADR-001 par. 5). The advertised preference and an
+  `esp_ble_gap_update_conn_params` request from `ESP_GATTS_CONNECT_EVT` both
+  ask for min = max = 0x0C (15 ms; slave latency 0; supervision timeout 6 s).
+  The pair matters, bench A/B on rwa-hs-1 with RWA Player as the central: the
+  ADR's 15–30 ms request (0x0C–0x18, Apple's usual "max ≥ min + 15 ms" form)
+  was granted at 30 ms, the top of the range and the interval iOS had picked
+  unasked before; the 15–15 request, the one pair Apple exempts from that
+  rule, was granted at 15 ms. Heading frames on the wire went from 38/s to
+  73–75/s, one per sensor tick (the tick runs ~13.5 ms with the I2C drain),
+  no TX congestion, heap unchanged. The grant arrives in
+  `ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT`, is logged with its status, and the
+  pacing follows it as before. This retires the 0.46.0 rule "never request a
+  fast interval": it was measured against WiFi coex (0 RTCM in 300 s with
+  the request), and WiFi is gone. Expected link numbers (ADR-001 par. 5):
+  mean latency ~8–12 ms, delivery jitter ~20–25 ms, no beacon-wake tails;
+  the app-side jitter measurement is part of the ADR's acceptance run.
 
 - **One per-assembly fact left in the image: the BLE name.**
   `tools/gen_caster_secrets.py` → `tools/gen_assembly_config.py`,

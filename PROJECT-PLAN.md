@@ -439,9 +439,10 @@ One notification = one frame = **16 bytes, little-endian, packed** (fits the 20 
 default-MTU notify payload; no reassembly, no length prefix). One frame per BLE
 connection event while a central is connected (RWAHT: while subscribed, §5.1),
 so the rate is the connection interval the central grants. rtk-rover ≥ 0.48.0
-requests 15–30 ms (ADR-001 §5), i.e. 33–66 Hz, and at a 15 ms grant may put two
-frames into one event (the sensor tick is 10 ms); ≤ 0.47 ran at the 22–45 ms
-iOS picked unasked. This is a cross-repo contract: encoders in `rtk-rover` `src/main.cpp` and
+requests 15 ms (ADR-001 §5; iOS granted it on the bench, where a 15–30 ms request
+had come back as 30 ms), i.e. ~66 events/s carrying one frame per ~13.5 ms sensor
+tick, ~74 frames/s; ≤ 0.47 ran at the 22–45 ms iOS picked unasked. This is a
+cross-repo contract: encoders in `rtk-rover` `src/main.cpp` and
 `rwa-headtracker` `rwaht/rwaht.ino` (`heading_frame_t` in both), decoders in
 `rwa-player` (`HeadtrackerManager.swift`) and `rwa-creator`
 (`bluetooth/devicehandler.cpp`).

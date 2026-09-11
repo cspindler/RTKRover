@@ -37,9 +37,11 @@ static void logInterval(const char *what, uint16_t units, uint16_t latency)
 // (ADR-001 par. 5). The advertised preference is a hint iOS accepts or
 // ignores at connect; this is the request it actually answers, with the
 // grant arriving in ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT (gapHandler), which
-// the heading pacing then follows. Until 0.47 this request was forbidden:
-// 15-30 ms starved WiFi through radio coex and killed the NTRIP stream
-// (0 RTCM in 300 s, A/B/A on rwa-hs-1, 2026-08-27). WiFi is gone.
+// the heading pacing then follows. min == max on purpose: iOS granted a
+// 15-30 ms request at 30 ms and the 15-15 one at 15 ms (bench 2026-09-11).
+// Until 0.47 this request was forbidden: 15-30 ms starved WiFi through
+// radio coex and killed the NTRIP stream (0 RTCM in 300 s, A/B/A on
+// rwa-hs-1, 2026-08-27). WiFi is gone.
 static void requestConnInterval(const esp_bd_addr_t remote_bda)
 {
   esp_ble_conn_update_params_t req = {};

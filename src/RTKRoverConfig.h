@@ -78,16 +78,21 @@
 #define TELEMETRY_CTRL_CHARACTERISTIC_UUID      "713D0102-503E-4C75-BA94-3148F18D941E"
 #define DATA_STR_DELIMITER           " "        // 713D0004 line: "<lat> <latHp> <lon> <lonHp>"
 
-// Connection interval (ADR-001 par. 5): the fastest Apple allows a non-HID
-// peripheral, advertised as the preference and requested on every connect.
-// A request this fast starved WiFi through coex until 0.47; WiFi is gone.
-#define BLE_CONN_INTERVAL_MIN_UNITS  0x0C  // 15 ms in 1.25 ms units: Apple's floor, a multiple of 15 ms
-#define BLE_CONN_INTERVAL_MAX_UNITS  0x18  // 30 ms: Apple wants max >= min + 15 ms
-#define BLE_CONN_SUPERVISION_TIMEOUT  400  // 4 s in 10 ms units: inside Apple's 2-6 s window
+// Connection interval (ADR-001 par. 5): 15 ms, the fastest Apple allows a
+// non-HID peripheral, advertised as the preference and requested on every
+// connect. min == max is the one pair Apple exempts from its "max >= min +
+// 15 ms" rule, and it matters: a 15-30 ms request was granted at 30 ms, the
+// 15-15 one at 15 ms (bench A/B, CHANGELOG 0.48.0). A request this fast
+// starved WiFi through coex until 0.47; WiFi is gone.
+#define BLE_CONN_INTERVAL_MIN_UNITS  0x0C  // 15 ms in 1.25 ms units
+#define BLE_CONN_INTERVAL_MAX_UNITS  0x0C  // = min: iOS otherwise grants the top of the range
+#define BLE_CONN_SUPERVISION_TIMEOUT  600  // 6 s in 10 ms units: inside Apple's window in both the
+                                           // older (2-6 s) and newer (6-18 s) guideline versions
 
 // Heading notify pacing: one frame per BLE connection event, derived from the
 // interval the central granted (block comment in main.cpp; CHANGELOG 0.46.2).
-// At the 15 ms grant the sensor tick is the floor: up to two fresh frames per event.
+// At the 15 ms grant the sensor tick (~13.5 ms with the I2C drain) is the
+// floor: one frame per tick, ~74/s.
 #define HEADING_NOTIFY_FALLBACK_MS    15   // until the stack reports the interval
 #define HEADING_NOTIFY_MIN_MS         10   // never faster than the sensor tick
 #define HEADING_NOTIFY_MAX_MS        120   // sanity bound; a long interval still gets a frame per event
