@@ -87,10 +87,12 @@ discarded frames still costs airtime and still holds a Bluedroid TX buffer,
 which is heap.
 
 So: keep draining the IMU every tick, keep the cached frame always fresh, and
-put exactly one frame on the wire per connection event. The interval is the
-iOS central's choice; ble_link learns it from the stack (bleLinkConnIntervalUnits)
-and the task paces against it, which adapts to whatever iOS picks instead of
-hardcoding a guess.
+put one frame on the wire per connection event. ble_link requests 15-30 ms
+(ADR-001 par. 5) but the grant is the iOS central's; ble_link learns it from
+the stack (bleLinkConnIntervalUnits) and the task paces against it, which
+adapts to whatever iOS grants instead of hardcoding a guess. At a 15 ms grant
+the 10 ms sensor tick is the floor, so an event may carry two frames, both
+fresher than the previous event's.
 */
 
 /**

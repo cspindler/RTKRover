@@ -33,6 +33,26 @@ static void logInterval(const char *what, uint16_t units, uint16_t latency)
              what, units, (units * 5u) / 4u, ((units * 5u) % 4u) * 25u, latency);
 }
 
+// Ask the central for the fastest interval Apple allows a non-HID peripheral
+// (ADR-001 par. 5). The advertised preference is a hint iOS accepts or
+// ignores at connect; this is the request it actually answers, with the
+// grant arriving in ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT (gapHandler), which
+// the heading pacing then follows. Until 0.47 this request was forbidden:
+// 15-30 ms starved WiFi through radio coex and killed the NTRIP stream
+// (0 RTCM in 300 s, A/B/A on rwa-hs-1, 2026-08-27). WiFi is gone.
+static void requestConnInterval(const esp_bd_addr_t remote_bda)
+{
+  esp_ble_conn_update_params_t req = {};
+  memcpy(req.bda, remote_bda, sizeof(esp_bd_addr_t));
+  req.min_int = BLE_CONN_INTERVAL_MIN_UNITS;
+  req.max_int = BLE_CONN_INTERVAL_MAX_UNITS;
+  req.latency = 0;
+  req.timeout = BLE_CONN_SUPERVISION_TIMEOUT;
+  esp_err_t err = esp_ble_gap_update_conn_params(&req);
+  DBG.printf("BLE conn params requested: %u-%u units -> %s\n",
+             req.min_int, req.max_int, err == ESP_OK ? "queued" : "failed");
+}
+
 class LinkServerCallbacks : public BLEServerCallbacks
 {
   void onConnect(BLEServer *)
@@ -72,8 +92,12 @@ static void gapHandler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
 {
   if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT)
   {
+    // status != 0 means the central declined; the interval reported is then
+    // the one still in force, which is what the pacing needs either way.
     connIntervalUnits.store(param->update_conn_params.conn_int, std::memory_order_relaxed);
-    logInterval("conn params", param->update_conn_params.conn_int,
+    logInterval(param->update_conn_params.status == ESP_BT_STATUS_SUCCESS
+                  ? "conn params granted" : "conn params declined",
+                param->update_conn_params.conn_int,
                 param->update_conn_params.latency);
   }
 }
@@ -99,6 +123,7 @@ static void gattsHandler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
     connIntervalUnits.store(param->connect.conn_params.interval, std::memory_order_relaxed);
     logInterval("connect", param->connect.conn_params.interval,
                 param->connect.conn_params.latency);
+    requestConnInterval(param->connect.remote_bda);
   }
 }
 
@@ -119,17 +144,11 @@ void bleLinkStartAdvertising(const char *serviceUuid)
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising->addServiceUUID(serviceUuid);
   pAdvertising->setScanResponse(true);
-  // Advertised connection-interval preference, units of 1.25 ms. Only a hint:
-  // iOS chooses the actual interval.
-  //
-  // Never request a faster interval via esp_ble_gap_update_conn_params: a
-  // granted 15-30 ms request starved the WiFi side through radio coex and
-  // killed the NTRIP stream completely (0 RTCM in 300 s, A/B/A on rwa-hs-1,
-  // 2026-08-27). The head-tracking cost of the default interval is small:
-  // notifies queue in the controller and flush together each connection
-  // event, so the newest frame still arrives every event.
-  pAdvertising->setMinPreferred(0x12);  // 22.5 ms
-  pAdvertising->setMaxPreferred(0x24);  // 45 ms
+  // Advertised connection-interval preference, units of 1.25 ms. Only a hint
+  // iOS may take at connect; requestConnInterval() asks for the same range
+  // once the link is up.
+  pAdvertising->setMinPreferred(BLE_CONN_INTERVAL_MIN_UNITS);
+  pAdvertising->setMaxPreferred(BLE_CONN_INTERVAL_MAX_UNITS);
   BLEDevice::startAdvertising();
 }
 

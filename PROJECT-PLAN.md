@@ -438,8 +438,10 @@ not an app one. (The app does not write CTRL today.)
 One notification = one frame = **16 bytes, little-endian, packed** (fits the 20 B
 default-MTU notify payload; no reassembly, no length prefix). One frame per BLE
 connection event while a central is connected (RWAHT: while subscribed, §5.1),
-so the rate is the connection interval the central grants: roughly 22–45 Hz on
-iOS. This is a cross-repo contract: encoders in `rtk-rover` `src/main.cpp` and
+so the rate is the connection interval the central grants. rtk-rover ≥ 0.48.0
+requests 15–30 ms (ADR-001 §5), i.e. 33–66 Hz, and at a 15 ms grant may put two
+frames into one event (the sensor tick is 10 ms); ≤ 0.47 ran at the 22–45 ms
+iOS picked unasked. This is a cross-repo contract: encoders in `rtk-rover` `src/main.cpp` and
 `rwa-headtracker` `rwaht/rwaht.ino` (`heading_frame_t` in both), decoders in
 `rwa-player` (`HeadtrackerManager.swift`) and `rwa-creator`
 (`bluetooth/devicehandler.cpp`).
@@ -453,7 +455,7 @@ drained every 10 ms and the cached frame always holds the newest sample, but
 only one frame is put on the wire per connection event. Nothing can leave the
 device between connection events anyway, so a faster notify rate only queued
 frames that arrived in the same burst and were discarded by the app, at the cost
-of radio airtime (WiFi blackout through coex) and Bluedroid TX buffers.
+of radio airtime and Bluedroid TX buffers.
 `t_dev_ms` is stamped at sample time, so the gap between it and arrival is the
 real sample age; `seq` counts frames put on the wire, so a gap in it still means
 lost notifications, not coalesced samples.

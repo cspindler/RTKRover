@@ -69,6 +69,21 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
 
 ### Changed
 
+- **BLE connection interval: 15–30 ms requested on every connect**
+  (`ble_link.cpp`, ADR-001 par. 5). The advertised preference moves from
+  22.5–45 ms to 15–30 ms (0x0C–0x18: Apple's floor for a non-HID peripheral
+  and its "max ≥ min + 15 ms" rule), and since iOS treats the preference as
+  a hint, `esp_ble_gap_update_conn_params` asks for the same range from
+  `ESP_GATTS_CONNECT_EVT` (slave latency 0, supervision timeout 4 s). The
+  grant arrives in `ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT`, is logged with its
+  status, and the heading pacing follows it as before: at a 15 ms grant the
+  10 ms sensor tick is the floor, so up to two fresh frames ride each of the
+  ~66 events/s. This retires the 0.46.0 rule "never request a fast
+  interval": it was measured against WiFi coex (0 RTCM in 300 s with the
+  request), and WiFi is gone. Expected (ADR-001 par. 5): mean link latency
+  ~8–12 ms, delivery jitter ~20–25 ms, no beacon-wake tails. The measured
+  grant and rates are in the 0.48.0 bench notes.
+
 - **Telemetry contract, breaking** (PROJECT-PLAN.md par. 4.3 and 5.3, v4).
   Retired on the BLE leg, never to be reused: heartbeat keys 12 `wifi_rssi`,
   13 `ntrip_connected`, 18 `loops_ntrip`; event type 3 `ntrip_status`; error
