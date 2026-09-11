@@ -84,6 +84,21 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
   ~8–12 ms, delivery jitter ~20–25 ms, no beacon-wake tails. The measured
   grant and rates are in the 0.48.0 bench notes.
 
+- **One per-assembly fact left in the image: the BLE name.**
+  `tools/gen_caster_secrets.py` → `tools/gen_assembly_config.py`,
+  `src/CasterSecrets.h` → `src/AssemblyConfig.h` (generated, gitignored),
+  carrying only `kBleName`. The name is the committed `tools/known-boards.txt`
+  label, so a fresh clone with a known board attached builds a correctly
+  named image with no secrets file at all; `tools/fleet-secrets.ini` is
+  optional and read only for a `ble_name` override (uniqueness and the 29 B
+  scan-response limit are still checked). Caster host / port / mount / user /
+  password and the hotspot password no longer exist in the firmware: they
+  are typed into RWA Player, and the fleet ini stays the record for
+  provisioning the phones. The build's "keep the previous header" and
+  placeholder behaviours are unchanged. ADR-002 moves the name into NVS and
+  retires the generator; until then `RTK_BOARD` or the attached board still
+  selects it at build time.
+
 - **Telemetry contract, breaking** (PROJECT-PLAN.md par. 4.3 and 5.3, v4).
   Retired on the BLE leg, never to be reused: heartbeat keys 12 `wifi_rssi`,
   13 `ntrip_connected`, 18 `loops_ntrip`; event type 3 `ntrip_status`; error

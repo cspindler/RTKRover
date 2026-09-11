@@ -5,7 +5,7 @@
 .a
 .elf
 # lib/*
-src/CasterSecrets.h
+src/AssemblyConfig.h
 src/telemetry/fw_version_autogen.h
 tools/fleet-secrets.ini
 tools/__pycache__

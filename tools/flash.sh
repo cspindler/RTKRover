@@ -15,8 +15,8 @@ cd "$(dirname "$0")/.."
 
 ENV_NAME="${1:-featheresp32}"
 
-# Export the board choice so the build's gen_caster_secrets.py bakes the same
-# assembly's credentials that find-board.sh resolves the port for.
+# Export the board choice so the build's gen_assembly_config.py bakes the same
+# assembly's BLE name that find-board.sh resolves the port for.
 if [ -n "${2:-}" ]; then
   export RTK_BOARD="$2"
 fi

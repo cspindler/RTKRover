@@ -21,7 +21,7 @@
 #include <sdkconfig.h>
 #include <esp_system.h> // esp_reset_reason()
 #include <RTKRoverConfig.h>
-#include <CasterSecrets.h>
+#include <AssemblyConfig.h>
 #include <battery.h>
 #include <led.h>
 #include <telemetry/telemetry.h>
@@ -48,8 +48,8 @@ static uint32_t getChipId()
   return chipId;
 }
 
-// Fleet-configured BLE name (fleet-secrets.ini via CasterSecrets.h), empty on
-// placeholder builds -> fall back to "<DEVICE_TYPE>-<chip-id>".
+// The assembly label from known-boards.txt (via the generated
+// AssemblyConfig.h), empty on placeholder builds -> "<DEVICE_TYPE>-<chip-id>".
 static String getBleName()
 {
   if (kBleName[0] != '\0')

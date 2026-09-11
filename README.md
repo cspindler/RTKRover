@@ -56,31 +56,18 @@ bno080.enableARVRStabilizedRotationVector(BNO080_ROT_VECT_UPDATE_RATE_MS);
 
 more information in the [datasheet](https://www.ceva-dsp.com/wp-content/uploads/2019/10/BNO080_085-Datasheet.pdf)
 
-ZED-F9P:
+Assembly name:
 
-Caster and WiFi credentials live in `tools/fleet-secrets.ini` (gitignored; copy
-from `tools/fleet-secrets_example.ini`), keyed by the assembly labels from
-`tools/known-boards.txt`. At build time `tools/gen_caster_secrets.py` generates
-`src/CasterSecrets.h` from them for the selected assembly. Set it with the
-`RTK_BOARD` env var (label or CP2104 serial), or just have exactly one known
-board attached. Do not edit the generated header by hand.
-
-```ini
-[caster]
-host = rtk2go.com
-port = 2101
-mount = YOUR_MOUNT_POINT
-pass =
-
-[rwa-hs-1]
-caster_user = YOUR_CASTER_USER_01
-wifi_pw = HOTSPOT_PASSWORD_OF_UNIT_1
-```
-
-The WiFi SSID equals the assembly label (the unit's phone hotspot is named
-after it); `wifi_ssid` in an assembly section overrides that. The BLE name also
-equals the assembly label, but falls back to `rtkrover-<chip-id>` if no
-corresponding assembly section exists in fleet-secrets.ini.
+The firmware embeds one per-assembly fact, the BLE name. It is the assembly
+label from `tools/known-boards.txt` (CP2104 serial → label, committed);
+`tools/gen_assembly_config.py` generates `src/AssemblyConfig.h` with it at
+build time for the selected assembly. Select with the `RTK_BOARD` env var
+(label or serial), or just have exactly one known board attached. A board
+not in that file advertises `rtkrover-<chip-id>`. Do not edit the generated
+header by hand. `tools/fleet-secrets.ini` (gitignored, optional; template in
+`tools/fleet-secrets_example.ini`) can override the name with `ble_name` and
+otherwise records the caster credentials for provisioning the phones: since
+ADR-001 the caster account is typed into RWA Player, not compiled in.
 
 The mklittlefs file in the root dir you have to [get](https://github.com/earlephilhower/mklittlefs/releases) depending on your OS.
 If you have the Arduino IDE installed, you can borrow it from there too. On macOS you can find it here: `~/Library/Arduino15/packages/esp32/tools/mklittlefs/3.0.0-gnu12-dc7f933/mklittlefs`.  Help for setup the file system you can find [here](https://randomnerdtutorials.com/esp8266-nodemcu-vs-code-platformio-littlefs/). This project was created on macOS (silicon).
