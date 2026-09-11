@@ -23,6 +23,23 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   (WiFi, caster, RTCM, `gnss_fix` all within 20 s). CLAUDE.md and
   PROJECT-PLAN.md §8.1 / §9.5 say what shipped instead of what was planned.
 
+- **BLE link state has one owner: `src/ble_link.{h,cpp}`.** A connect used to be
+  observed in three places: `MyServerCallbacks` in `main.cpp` (the `bleConnected`
+  global), `telemetry_ble.cpp` (its own `linkConnected` / `peerMtu` /
+  `connectionGeneration` atomics) and the raw `bleGattsHandler` (the interval),
+  with the heading pacing flags (`bleConnIntervalUnits`, `bleTxCongested*`) as
+  globals in between. The new module owns connected, connection generation, MTU,
+  granted interval and TX congestion as atomics, brings up Bluedroid
+  (`bleLinkBegin`, `bleLinkStartAdvertising`) and holds the `BLEServerCallbacks`
+  and custom GAP/GATTS handlers. `main.cpp` and the telemetry drain read it
+  through `bleLink*()`; `telemetryBleOnConnect/OnMtuChanged` are gone and only
+  the CCCD reset (`telemetryBleOnDisconnect`) remains a callback. The stale
+  congestion-flag timeout moved into `bleLinkTxCongested()`. No wire or timing
+  change; it is also the one file a NimBLE port would rewrite. Verified with the
+  phone connecting during a bench boot on rwa-hs-1: interval 24 units learned
+  from `ESP_GATTS_CONNECT_EVT`, MTU 517, heading notifies at the 20 ms pacing,
+  position stream at 10 Hz. +140 B flash.
+
 ## [Unreleased - lean pass part 1]
 
 ### Changed

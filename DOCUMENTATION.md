@@ -1,6 +1,7 @@
 # rtk-rover runtime architecture
 
-What actually runs on the ESP32, from `src/main.cpp` and `src/telemetry/`.
+What actually runs on the ESP32, from `src/main.cpp`, `src/ble_link.cpp` and
+`src/telemetry/`.
 Constants live in `src/RTKRoverConfig.h` (FreeRTOS section); keep this table in
 step with them.
 
@@ -27,15 +28,21 @@ above telemetry (1). A tie would time-slice and jitter the heading cadence.
 - `xQueueCoord`, depth 2, latest position wins (a full queue drops its oldest entry).
 - Telemetry ring (`TelemetryBuffer`, 4 KB, static): producers push under a `portMUX`
   critical section, drop-oldest on overflow; single consumer is the drain task.
-- Cross-task scalars are `std::atomic` (telemetry module) or `volatile` (`bleConnected`,
-  `lastGgaHeard_ms`, `lastFixGgaHeard_ms`, `ggaSentenceComplete`, BLE pacing state).
+- BLE link state (connected, connection generation, MTU, granted connection
+  interval, TX congestion) has one owner, `src/ble_link.cpp`: `std::atomic`s written
+  by the Bluedroid callbacks, read through `bleLink*()` by the heading, position
+  and telemetry-drain tasks. It is also the only file that touches the raw
+  Bluedroid API (custom GAP/GATTS handlers, `esp_ble_*` types).
+- Other cross-task scalars are `std::atomic` (telemetry module) or `volatile`
+  (`lastGgaHeard_ms`, `lastFixGgaHeard_ms`, `ggaSentenceComplete`).
 
 ## Boot order (`setup()`)
 
 1. LED, `batteryInit()`; debug builds wait for a key on serial.
 2. `reportResetReason()`: brownout / panic / watchdog become `error` events waiting in the ring.
 3. Debug builds run the AUnit suites here (100 passes), not in `loop()`.
-4. `setupBLE()`: tracker service + telemetry service, advertising starts. BLE first.
+4. `setupBLE()`: `bleLinkBegin()` brings up Bluedroid, then the tracker service +
+   telemetry service are created and `bleLinkStartAdvertising()` runs. BLE first.
 5. `telemetryBleStartTask()`: started before the sensor setups so their failures are visible.
 6. 300 ms radio stagger, then `setupWiFi()`: one 10 s bounded attempt, boot continues regardless.
 7. `setupGNSS()`: retries forever until the ZED-F9P answers (emits `i2c_*` errors once).
@@ -47,5 +54,6 @@ IMU faults become visible only once a phone connects (matches the `imu_status` c
 ## Callback contexts
 
 - `callbackGPGGA` runs inside `myGNSS.checkCallbacks()` on the NTRIP task.
-- BLE server callbacks, the custom GAP/GATTS handlers and the telemetry CTRL `onWrite`
-  run on the Bluedroid BTC task: they only set atomics or volatiles and return.
+- The BLE server callbacks and custom GAP/GATTS handlers (`ble_link.cpp`) and the
+  telemetry CTRL `onWrite` run on the Bluedroid BTC task: they only set atomics,
+  toggle advertising and return.

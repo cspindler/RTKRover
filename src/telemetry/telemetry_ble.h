@@ -9,12 +9,12 @@
  * frames are packed into notifications up to the negotiated MTU-3 and may span
  * notification boundaries; the app reassembles via the length prefix.
  *
+ * Link state (connected, MTU, connection generation) comes from ble_link.
  * Wiring expected from main.cpp:
  *   - telemetryBleSetup(pServer) inside setupBLE()
- *   - telemetryBleStartTask() once tasks are created in setup()
- *   - telemetryBleOnConnect/OnDisconnect/OnMtuChanged from the
- *     BLEServerCallbacks (MTU matters: notifying more than MTU-3 bytes would
- *     be silently truncated by Bluedroid and corrupt the stream)
+ *   - telemetryBleStartTask() early in setup()
+ * and from ble_link.cpp:
+ *   - telemetryBleOnDisconnect() from the server's onDisconnect
  ******************************************************************************/
 #ifndef TELEMETRY_BLE_H
 #define TELEMETRY_BLE_H
@@ -25,9 +25,10 @@
 void telemetryBleSetup(BLEServer *pServer);
 void telemetryBleStartTask();
 
-void telemetryBleOnConnect();
+/// The Arduino BLE lib keeps CCCD values across connections; this forgets the
+/// TX subscription so a new central must subscribe itself before it is
+/// counted as listening.
 void telemetryBleOnDisconnect();
-void telemetryBleOnMtuChanged(uint16_t mtu);
 
 /// For the debug-build stack watermark report.
 TaskHandle_t telemetryBleTaskHandle();

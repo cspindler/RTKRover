@@ -27,6 +27,7 @@
 #include <WiFiUdp.h> // hotspot path warmer (warmHotspotPath)
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
+#include <ble_link.h>
 #ifdef TESTING
 #include <TestsRTKRover.h>  // AUnit suites; debug builds only
 #endif
@@ -36,9 +37,6 @@
                                 Bluetooth LE
 =================================================================================
 */
-// Written by the BLE server callbacks (BTC task), read by three tasks.
-volatile bool bleConnected = false; // TODO: deglobalize this
-
 // Fleet-configured BLE name (fleet-secrets.ini via CasterSecrets.h), empty on
 // placeholder builds -> fall back to the chip-id name.
 static String getBleName()
@@ -64,48 +62,6 @@ static void logFreeHeap(const char *where)
              where, esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
 }
 
-// Heading notify pacing state, written from the Bluedroid callback thread and
-// read by the head-tracking task. Rationale in the block comment further down,
-// above bleGapHandler().
-// Negotiated connection interval in 1.25 ms units; 0 until GAP reports it.
-static volatile uint16_t bleConnIntervalUnits = 0;
-// Set while the GATT server's TX queue is full (ESP_GATTS_CONGEST_EVT), with
-// the time it latched: a missed "cleared" event must not freeze head tracking.
-static volatile bool bleTxCongested = false;
-static volatile uint32_t bleTxCongestedSince_ms = 0;
-
-class MyServerCallbacks: public BLEServerCallbacks
-{
-    void onConnect(BLEServer* pServer)
-    {
-        bleConnected = true;
-        BLEDevice::stopAdvertising();
-        telemetryBleOnConnect();
-        logFreeHeap("ble_connect");
-    };
-
-    void onDisconnect(BLEServer* pServer)
-    {
-        bleConnected = false;
-        // Don't carry this link's pacing state into the next central: a new one
-        // negotiates its own interval, and a congestion flag latched as the link
-        // dropped would otherwise stall the first frames after reconnect.
-        bleConnIntervalUnits = 0;
-        bleTxCongested = false;
-        BLEDevice::startAdvertising();
-        telemetryBleOnDisconnect();
-        logFreeHeap("ble_disconnect");
-    }
-
-    void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param)
-    {
-        // The telemetry drain must know the real MTU: notifying more than
-        // mtu-3 bytes is silently truncated and would desync its stream.
-        telemetryBleOnMtuChanged(param->mtu.mtu);
-        DBG.printf("BLE MTU changed: %u\n", param->mtu.mtu);
-    }
-};
-
 BLECharacteristic *pHeadtrackerCharacteristic;
 BLECharacteristic *pRealtimeKinematicsCharacteristic;
 
@@ -123,63 +79,22 @@ is heap.
 
 So: keep draining the IMU every tick, keep the cached frame always fresh, and
 put exactly one frame on the wire per connection event. The interval is the
-iOS central's choice. We can learn it from GAP and pace against it, which adapts
-to whatever iOS picks instead of hardcoding a guess.
+iOS central's choice; ble_link learns it from the stack (bleLinkConnIntervalUnits)
+and the task paces against it, which adapts to whatever iOS picks instead of
+hardcoding a guess.
 */
-
-// Learn the connection interval the central actually granted.
-static void bleGapHandler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
-{
-  if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT)
-  {
-    bleConnIntervalUnits = param->update_conn_params.conn_int;
-    DBG.printf("BLE conn params: interval %u units (%u.%02u ms), latency %u\n",
-               param->update_conn_params.conn_int,
-               (param->update_conn_params.conn_int * 5u) / 4u,
-               ((param->update_conn_params.conn_int * 5u) % 4u) * 25u,
-               param->update_conn_params.latency);
-  }
-}
-
-// Backpressure from the GATT server's TX queue. Without it a full queue shows
-// up only as a storm of `esp_ble_gatts_send_notify: rc=-1` errors and silently
-// dropped frames.
-static void bleGattsHandler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
-                            esp_ble_gatts_cb_param_t *param)
-{
-  (void)gatts_if;
-  if (event == ESP_GATTS_CONGEST_EVT)
-  {
-    bleTxCongested = param->congest.congested;
-    if (param->congest.congested) bleTxCongestedSince_ms = millis();
-  }
-  else if (event == ESP_GATTS_CONNECT_EVT)
-  {
-    // The interval in force at connection setup. This is the source that
-    // actually fires with iOS: testing showed ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT
-    // not arriving (the central accepted the advertised preference and ran no
-    // update procedure), leaving the pacing on its fallback. GAP still handles
-    // a later renegotiation.
-    bleConnIntervalUnits = param->connect.conn_params.interval;
-    DBG.printf("BLE connect: interval %u units (%u.%02u ms), latency %u\n",
-               param->connect.conn_params.interval,
-               (param->connect.conn_params.interval * 5u) / 4u,
-               ((param->connect.conn_params.interval * 5u) % 4u) * 25u,
-               param->connect.conn_params.latency);
-  }
-}
 
 /**
  * @brief Notify period to pace the heading stream against, in ms.
  *
  * One tick short of the granted connection interval, so every connection event
  * finds a frame refreshed since the last one without a second frame queueing
- * behind it. Falls back to a fast default until GAP reports the interval, so a
- * central that never triggers the event cannot make head tracking sluggish.
+ * behind it. Falls back to a fast default until the stack reports the interval,
+ * so a central that never triggers the event cannot make head tracking sluggish.
  */
 static uint32_t headingNotifyPeriodMs(void)
 {
-  const uint16_t units = bleConnIntervalUnits;
+  const uint16_t units = bleLinkConnIntervalUnits();
   if (units == 0) return HEADING_NOTIFY_FALLBACK_MS;
 
   const uint32_t interval_ms = (units * 5u) / 4u;  // 1.25 ms units
@@ -1530,31 +1445,16 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 void setupBLE(void)
 {
   String deviceName = getBleName();
-  BLEDevice::setCustomGapHandler(bleGapHandler);
-  BLEDevice::setCustomGattsHandler(bleGattsHandler);
-  BLEDevice::init(deviceName.c_str());
-  BLEServer *pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  BLEServer *pServer = bleLinkBegin(deviceName.c_str());
   BLEService *pService = pServer->createService(SERVICE_UUID);
-  // Create characteristics
+  // Notify-only characteristics (fastest: no response)
   pHeadtrackerCharacteristic = pService->createCharacteristic(
-    HEADTRACKER_BIN_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY  // We only use notify characteristic (fastest -> no response)
-  );
-
-  pRealtimeKinematicsCharacteristic = pService->createCharacteristic(
-    REALTIME_KINEMATICS_CHARACTERISTIC_UUID,
-    //  BLECharacteristic::PROPERTY_READ   |
-    //  BLECharacteristic::PROPERTY_WRITE  |
-    //  BLECharacteristic::PROPERTY_INDICATE |
-    BLECharacteristic::PROPERTY_NOTIFY  // We only use notify characteristic (fastest -> no response)
-  );
-
+    HEADTRACKER_BIN_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pHeadtrackerCharacteristic->addDescriptor(new BLE2902());
 
+  pRealtimeKinematicsCharacteristic = pService->createCharacteristic(
+    REALTIME_KINEMATICS_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
-  // pRealtimeKinematicsCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
-  // pRealtimeKinematicsCharacteristic->setValue(deviceName.c_str());
 
   pService->start();
 
@@ -1562,22 +1462,7 @@ void setupBLE(void)
   // 31 B adv payload has no room for a second 128-bit UUID.
   telemetryBleSetup(pServer);
 
-  BLEAdvertising *pAdvertising = pServer->getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  // Advertised connection-interval preference, units of 1.25 ms.
-  // Only a hint - iOS chooses the actual interval.
-  //
-  // Don't request a faster interval via esp_ble_gap_update_conn_params:
-  // a granted 15-30 ms request starved the WiFi side through radio coex
-  // and killed the NTRIP stream completely. The head-tracking
-  // cost of the default interval is small: notifies queue in the controller
-  // and flush together each connection event, so the newest frame still
-  // arrives every event.
-  pAdvertising->setMinPreferred(0x12);  // 22.5 ms
-  pAdvertising->setMaxPreferred(0x24);  // 45 ms
-  //pAdvertising->start();
-  BLEDevice::startAdvertising();
+  bleLinkStartAdvertising(SERVICE_UUID);
   DBG.println(F("Characteristic defined! Now you can read it in your phone!"));
 }
 
@@ -1631,11 +1516,11 @@ void task_send_rtk_position_via_ble(void *pvParameters)
   // 1.8 kB minimum, allocating four temporaries per notification.
   char latLonStr[32];
 
-  while (!bleConnected) blinkOneTime(100, true);
+  while (!bleLinkConnected()) blinkOneTime(100, true);
 
   while (true)
   {
-    if (bleConnected)
+    if (bleLinkConnected())
     {
       if (xQueueReceive( xQueueCoord, &coord, ( TickType_t ) 10 ) == pdPASS)
       {
@@ -1657,7 +1542,7 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         pRealtimeKinematicsCharacteristic->notify();
       }
 
-    } /*** if (bleConnected) ends ***/
+    } /*** if (bleLinkConnected()) ends ***/
     else
     {
       blinkOneTime(100, true);
@@ -1700,7 +1585,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
 {
   (void)pvParameters;
 
-  while (!bleConnected)
+  while (!bleLinkConnected())
   {
     DBG.println(F("BNO tasks setup: Open RWA to connect BLE"));
     vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -1734,7 +1619,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
 
   while (true)
   {
-    if (!bleConnected)
+    if (!bleLinkConnected())
     {
       DBG.println(F("BNO tasks loop: Please connect BLE"));
       vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -1757,7 +1642,7 @@ void task_bno_orientation_via_ble(void *pvParameters)
         DBG.printf("bno stats: ticks %u, reports %u, notifies %u (period %u ms, conn %u units), "
                    "misses %u, max drain %u, last drain %u us\n",
                    bnoTicks, bnoReports, bnoNotifies, headingNotifyPeriodMs(),
-                   bleConnIntervalUnits, bnoMisses, bnoMaxDrain, bnoLastRead_us);
+                   bleLinkConnIntervalUnits(), bnoMisses, bnoMaxDrain, bnoLastRead_us);
         bnoTicks = bnoReports = bnoMisses = bnoMaxDrain = bnoNotifies = 0;
         bnoLastStats_ms = millis();
       }
@@ -1804,19 +1689,15 @@ void task_bno_orientation_via_ble(void *pvParameters)
 
       // Transmit at most one frame per connection event. A congested TX queue
       // means the previous frames have not gone out yet, so adding another
-      // only deepens the backlog the app will discard. skip and let the next
-      // tick send a fresher one. The timeout is a safety net: if the
-      // "congestion cleared" event is ever missed, head tracking must not
-      // freeze waiting for it.
+      // only deepens the backlog the app will discard: skip and let the next
+      // tick send a fresher one (ble_link drops a stale congestion flag by
+      // itself, so a missed "cleared" event cannot freeze head tracking).
       const uint32_t nowNotify_ms = millis();
-      const bool congestionStale = bleTxCongested &&
-          (nowNotify_ms - bleTxCongestedSince_ms) >= BLE_TX_CONGESTION_MAX_MS;
-      if (frameFresh && (!bleTxCongested || congestionStale) &&
+      if (frameFresh && !bleLinkTxCongested() &&
           (nowNotify_ms - lastHeadingNotify_ms) >= headingNotifyPeriodMs())
       {
         lastHeadingNotify_ms = nowNotify_ms;
         frameFresh = false;
-        if (congestionStale) bleTxCongested = false;  // assume a missed clear
         // seq counts frames put on the wire, so the apps' drop detection keeps
         // meaning "this many notifications went missing" and not "this many
         // samples were coalesced".

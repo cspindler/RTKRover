@@ -7,20 +7,13 @@
 #include <atomic>
 
 #include "battery.h"
+#include "ble_link.h"
 #include "telemetry/telemetry.h"
 
 static BLECharacteristic *pTelemetryTx = nullptr;
 static BLE2902 *pTxCccd = nullptr;
 static TaskHandle_t hTelemetryTask = nullptr;
 
-static std::atomic<bool> linkConnected{false};
-// Effective ATT MTU. 23 until the central exchanges (iOS requests ~185
-// right after connecting); notifications are capped at mtu-3.
-static std::atomic<uint16_t> peerMtu{23};
-// Bumped on every connect; the drain task resets its partial-frame stream
-// state when it changes, so a new central never receives the tail of a
-// frame that was half-sent to the previous connection.
-static std::atomic<uint32_t> connectionGeneration{0};
 static std::atomic<bool> statusDumpRequested{false};
 
 /**
@@ -71,24 +64,9 @@ void telemetryBleSetup(BLEServer *pServer)
   // for a second 128-bit UUID. The app discovers the service after connecting.
 }
 
-void telemetryBleOnConnect()
-{
-  peerMtu.store(23, std::memory_order_relaxed);
-  connectionGeneration.fetch_add(1, std::memory_order_relaxed);
-  linkConnected.store(true, std::memory_order_relaxed);
-}
-
 void telemetryBleOnDisconnect()
 {
-  linkConnected.store(false, std::memory_order_relaxed);
-  // The Arduino BLE lib keeps CCCD values across connections; a new central
-  // must subscribe itself before we count it as listening.
   if (pTxCccd != nullptr) pTxCccd->setNotifications(false);
-}
-
-void telemetryBleOnMtuChanged(uint16_t mtu)
-{
-  peerMtu.store(mtu, std::memory_order_relaxed);
 }
 
 /**
@@ -150,10 +128,10 @@ static void telemetryDrainTask(void *pvParameters)
                  telemetryDroppedFrames(), battMv);
     }
 
-    if (!linkConnected.load(std::memory_order_relaxed)) continue;
+    if (!bleLinkConnected()) continue;
     if (pTxCccd == nullptr || !pTxCccd->getNotifications()) continue;
 
-    uint32_t generation = connectionGeneration.load(std::memory_order_relaxed);
+    uint32_t generation = bleLinkGeneration();
     if (generation != lastGeneration)
     {
       lastGeneration = generation;
@@ -163,8 +141,7 @@ static void telemetryDrainTask(void *pvParameters)
     // Notifying more than mtu-3 bytes would be silently truncated by
     // Bluedroid and desync the stream; before the MTU exchange this caps
     // payloads at 20 B, which the byte-stream framing handles fine.
-    size_t cap = min((size_t)(peerMtu.load(std::memory_order_relaxed) - 3),
-                     sizeof(notifBuf));
+    size_t cap = min((size_t)(bleLinkMtu() - 3), sizeof(notifBuf));
     for (int i = 0; i < TELEMETRY_MAX_NOTIFY_PER_TICK; i++)
     {
       size_t fill = fillNotification(notifBuf, cap);
