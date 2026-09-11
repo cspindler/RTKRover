@@ -9,6 +9,22 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [Unreleased - lean pass part 2]
+
+### Changed
+
+- **Partition table: `min_spiffs.csv`** (two OTA slots of 1.92 MB, `ota_0`/`ota_1`
+  + `otadata`, 128 KB SPIFFS unused, 64 KB coredump) instead of `no_ota.csv`
+  (one 2 MB slot). Closes work-queue item 5: the stock `default.csv` slots
+  (1.25 MB) cannot hold the image, `min_spiffs.csv` leaves ~330 KB. The image is
+  unchanged (1,633,317 B production, 1,671,081 B debug), it now reads as 83 % /
+  85 % of the slot instead of 78 % / 80 % of the old one. **Every unit needs one
+  USB flash** to receive the new table; a verified boot afterwards on rwa-hs-1
+  (WiFi, caster, RTCM, `gnss_fix` all within 20 s). CLAUDE.md and
+  PROJECT-PLAN.md §8.1 / §9.5 say what shipped instead of what was planned.
+
+## [Unreleased - lean pass part 1]
+
 ### Changed
 
 - Lean pass, behaviour-preserving cleanups:

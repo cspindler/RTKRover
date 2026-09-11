@@ -43,7 +43,9 @@ Toolchain is **PlatformIO + Arduino framework** (not ESP-IDF). All configuration
   `upload_port`/`monitor_port`/`test_port` keys — a hardcoded port embeds one
   unit's serial number and goes stale on a board swap, which is exactly how it
   broke before. Discovery replaces it.
-- TODO: document partitioning / OTA
+- Partition table: `min_spiffs.csv` (two 1.92 MB OTA slots, 128 KB SPIFFS
+  unused, 64 KB coredump). Changing the table needs a USB flash of every unit;
+  `pio run -t upload` rewrites it.
 
 ### Observing the device (autonomous iterate → build → flash → observe loop)
 
@@ -129,13 +131,11 @@ Hardware-in-the-loop iteration needs, once per machine/session:
   become Grafana alert dimensions; don't rename casually.
 - Versioning: `fw_version` = semver + short git hash, embedded at build time and
   reported in every heartbeat event.
-- Partition table: two-OTA-slot scheme (ota_0/ota_1 + otadata) is the target for
-  deployed builds, but the tree currently ships `no_ota.csv`. **Blocking conflict:**
-  the app is already ~1.65 MB (78.5 % of the 2 MB single slot, measured
-  2026-09-08), so the stock
-  `default.csv` (1.25 MB per OTA slot) will not link. Moving to OTA needs
-  `min_spiffs.csv` (~1.9 MB/slot) or a custom table — decide before item 5 in the
-  work queue.
+- Partition table: `min_spiffs.csv`, decided 2026-09-11 (two OTA slots of
+  1.92 MB, `ota_0`/`ota_1` + `otadata`). The stock `default.csv` (1.25 MB per
+  slot) cannot hold the ~1.63 MB image; `min_spiffs.csv` leaves ~330 KB (16 %)
+  headroom. Nothing in the tree uses SPIFFS or LittleFS, so its 128 KB region
+  costs nothing. The tree shipped `no_ota.csv` until then.
 - Flash headroom is the binding budget, not just RAM (RAM is at 18 %). Check the
   `Flash:` line of every `pio run` and flag growth toward the slot ceiling.
 - **Memory escalation ladder** (decided 2026-07-29; context: Arduino framework
@@ -144,7 +144,7 @@ Hardware-in-the-loop iteration needs, once per machine/session:
   shows sustained free-heap minimums under ~6–8 KB, escalate in this order;
   do not jump straight to an IDF migration:
   1. Port BLE to NimBLE-Arduino (stays in Arduino; frees ~30–50 KB heap AND
-     ~100 KB flash, which also helps the OTA slot conflict above). Expected
+     ~100 KB flash, which also widens the OTA slot headroom above). Expected
      first lever.
   2. Rebuild as "Arduino as an IDF component" (code unchanged, unlocks
      `sdkconfig`/menuconfig for IDF memory knobs).
@@ -157,7 +157,8 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 2. ~~Ring buffer + telemetry task; CBOR encoding with short integer keys~~ done 2026-07-29
 3. ~~Event emitters: gnss_fix (1 Hz), heartbeat (15 s), ntrip_status, imu_status, error~~ done 2026-07-29
 4. ~~CTRL commands: set verbosity, status dump~~ done 2026-07-29 (device side; app sends nothing yet)
-5. OTA partition table (version embedding is done; the partition decision —
-   `min_spiffs.csv` vs custom table — is still open, see the constraint above)
+5. ~~OTA partition table~~ done 2026-09-11 (`min_spiffs.csv`; version embedding
+   was already done). OTA *delivery* (backend → app → BLE chunked transfer,
+   PROJECT-PLAN §8.1) is not started.
 6. Live end-to-end check with the updated RWA Player build (device events in
    the Diagnostics tab), then watch real events land in Grafana (§9 step 4)

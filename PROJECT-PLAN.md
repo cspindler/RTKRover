@@ -523,8 +523,11 @@ Operations: nightly `pg_dump` to S3 (host cron + `scripts/backup.sh`), disk-usag
 
 ## 8. OTA groundwork (decisions made now, delivery later)
 
-1. **Firmware**: ESP32 flash partitioned with the standard two-OTA-slot scheme from the
-   first deployed build. `fw_version` (semver + git hash) reported in every heartbeat.
+1. **Firmware**: ESP32 flash partitioned with a two-OTA-slot scheme. Shipped:
+   `no_ota.csv` (one 2 MB slot) through 2026-09-11, `min_spiffs.csv` (two 1.92 MB
+   slots, `ota_0`/`ota_1` + `otadata`) from then on; the stock `default.csv` slots
+   (1.25 MB) are too small for the ~1.6 MB image. `fw_version` (semver + git hash)
+   reported in every heartbeat.
    Future delivery path: backend → app → BLE chunked transfer (CTRL characteristic),
    protocol already versioned.
 2. **Content (soundwalks)**: versioned asset bundles described by a manifest, fetched
@@ -539,7 +542,9 @@ Operations: nightly `pg_dump` to S3 (host cron + `scripts/backup.sh`), disk-usag
 2. Backend stack up; build dashboards against `scripts/fake_data.py` synthetic traffic.
 3. rwa-player: SQLite buffer + uploader, tested with canned events.
 4. rtk-rover: telemetry GATT service + trace task; watch real events land in Grafana.
-5. OTA partition table ships with the first trace-task firmware build.
+5. ~~OTA partition table ships with the first trace-task firmware build.~~ Shipped
+   2026-09-11 (`min_spiffs.csv`), later than planned; the single-slot table did
+   not block anything before OTA delivery exists.
 
 ## 10. Decision log
 
@@ -558,4 +563,5 @@ Operations: nightly `pg_dump` to S3 (host cron + `scripts/backup.sh`), disk-usag
 | 2026-08 | §4–5 re-checked against shipped firmware 0.44.3 | key tables matched exactly; the prose had drifted (status_dump scope, imu_status cadence, frame splitting, error codes, advertising) |
 | 2026-08 | Reduced positioning reporting frequency to 10 Hz | reduce I2C load on ZED-F9P |
 | 2026-08 | Binary heading frame on `713D0005` (§5.5), rtk-rover 0.46.0; `713D0002` ASCII heading frozen as RWAHT-only | head-tracking latency: the ASCII path quantized to integer degrees, carried no seq/timestamp, and rode on a sensor FIFO that delivered stale oldest-first samples; no dual-emit, so fleet firmware and apps ship together |
+| 2026-09 | rtk-rover partition table `min_spiffs.csv` (two 1.92 MB OTA slots) | the image (~1.63 MB) outgrew the stock `default.csv` OTA slots (1.25 MB); `min_spiffs.csv` keeps ~330 KB headroom and nothing in the firmware uses SPIFFS. One USB flash per unit to apply |
 | 2026-08 | RWAHT 0.3.0 adopts the `713D0005` binary frame alongside the legacy `713D0002`, one active path per connection selected by CCCD subscription (binary wins) | RWAHT serves clients outside the fleet-shipping cycle (RWA Monitor, pd-based projects), so unlike rtk-rover it keeps the ASCII path for unmodified clients; subscription selection means the inactive path costs nothing. Kind detection must key on `713D0004`/telemetry, no longer on `713D0005` presence |
