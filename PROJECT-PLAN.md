@@ -255,6 +255,7 @@ The codes are part of the contract (they will be alert labels). What the firmwar
 | `ntrip_request_overflow` | 2 | the request to the caster did not fit its buffer: a config mistake, not a field fault |
 | `gnss_pipe_stall` | 1 | a GNSS-pipeline step ran over threshold (5 s): one NTRIP-task iteration (`msg` carries the mutex/checkUblox/push/GGA phase breakdown; the remainder is connect/response time) or one position-task `updatePosition` mutex hold. Diagnosis instrumentation for the 2026-08 slowdowns; rate-limited to one per 10 s per site |
 | `gnss_degraded` | 2 | the receiver produced no GGA for 30 s (mute module, bench 4.1 2026-08-24) and a recovery-ladder rung ran: `msg` carries silence duration, attempt number and action (reconfigure → sw reset → hard reset). While silent, caster connects are skipped (a VRS streams nothing without GGA) |
+| `gnss_config_retry` | 1 | the receiver answered `begin()` but did not acknowledge one configuration write during setup; the whole configuration is retried and `msg` names the step. Not a wiring fault (until 0.46.2 this raised `i2c_gnss_not_detected` instead) |
 | `i2c_bus_rtk_failed` | 3 | the sensor bus would not start |
 | `i2c_bno080_not_detected` | 3 | head-tracking IMU not answering |
 | `i2c_gnss_not_detected` | 3 | GNSS receiver not answering: the assembly is useless without it |

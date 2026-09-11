@@ -518,28 +518,35 @@ void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
  * the NTRIP task (which calls it holding mutexSem after a reset).
  * Never loops/blocks on an unresponsive module.
  *
- * @return true if the module responded and every config write was accepted
+ * @return NULL when the module answered and every config write was
+ *         acknowledged; otherwise the name of the step that failed. "begin"
+ *         means the module is not answering at all (wiring); any other name
+ *         is one config write the module did not ACK, which every caller
+ *         simply retries.
  */
-static bool configureGNSS()
+static const char *configureGNSS()
 {
     if (myGNSS.begin(Wire1, RTK_I2C_ADDR) == false)
-      return false;
+      return "begin";
 
     // Fewer, larger I2C transactions: 4x fewer start/stop cycles for the
     // same data (library default is 32; the lib itself recommends 128 on
     // ESP32, whose Wire buffer is 128 B).
     myGNSS.setI2CTransactionSize(128);
 
-    bool response = true;
-    response &= myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_NMEA); // Set the I2C port to output both NMEA and UBX messages
-    response &= myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3); // Be sure RTCM3 input is enabled. UBX + RTCM3 is not a valid state.
-    response &= myGNSS.setDGNSSConfiguration(SFE_UBLOX_DGNSS_MODE_FIXED); // Set the differential mode - ambiguities are fixed whenever possible
-    response &= myGNSS.enableNMEAMessage(UBX_NMEA_GGA, COM_PORT_I2C);  // Verify the GGA sentence is enabled
-    response &= myGNSS.setHighPrecisionMode(true);
-    response &= myGNSS.setMainTalkerID(SFE_UBLOX_MAIN_TALKER_ID_GP); // Set the Main Talker ID to "GP". The NMEA GGA messages will be GPGGA instead of GNGGA
+    // Stop at the first write the module does not ACK and name it: a bare
+    // false hid which one (2026-09-11 captures: a first-pass failure on
+    // every boot, always cleared by the retry).
+#define GNSS_CFG_STEP(name, call) do { if (!(call)) return name; } while (0)
+    GNSS_CFG_STEP("setI2COutput", myGNSS.setI2COutput(COM_TYPE_UBX | COM_TYPE_NMEA)); // I2C port outputs both NMEA and UBX
+    GNSS_CFG_STEP("setPortInput", myGNSS.setPortInput(COM_PORT_I2C, COM_TYPE_UBX | COM_TYPE_NMEA | COM_TYPE_RTCM3)); // RTCM3 input on. UBX + RTCM3 alone is not a valid state.
+    GNSS_CFG_STEP("setDGNSSConfiguration", myGNSS.setDGNSSConfiguration(SFE_UBLOX_DGNSS_MODE_FIXED)); // ambiguities fixed whenever possible
+    GNSS_CFG_STEP("enableNMEAMessage", myGNSS.enableNMEAMessage(UBX_NMEA_GGA, COM_PORT_I2C)); // GGA sentence enabled
+    GNSS_CFG_STEP("setHighPrecisionMode", myGNSS.setHighPrecisionMode(true));
+    GNSS_CFG_STEP("setMainTalkerID", myGNSS.setMainTalkerID(SFE_UBLOX_MAIN_TALKER_ID_GP)); // GPGGA instead of GNGGA
 
-    // Set output in Hz.
-    response &= myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ);
+    // Solution output rate in Hz.
+    GNSS_CFG_STEP("setNavigationFrequency", myGNSS.setNavigationFrequency(NAVIGATION_FREQUENCY_HZ));
 
     // Stream the nav messages instead of polling them. Polled getters block
     // on an I2C poll round-trip per message (measured bursts up to ~2 s in
@@ -548,19 +555,20 @@ static bool configureGNSS()
     // carrSoln, h/vAcc, SIV, pDOP), NAV-HPPOSLLH (high-res lat/lon/height)
     // and NAV-HPPOSECEF (getPositionAccuracy) at the navigation rate, and
     // the getters become non-blocking reads of the cached packet.
-    response &= myGNSS.setAutoPVT(true);
-    response &= myGNSS.setAutoHPPOSLLH(true);
-    response &= myGNSS.setAutoNAVHPPOSECEF(true);
+    GNSS_CFG_STEP("setAutoPVT", myGNSS.setAutoPVT(true));
+    GNSS_CFG_STEP("setAutoHPPOSLLH", myGNSS.setAutoHPPOSLLH(true));
+    GNSS_CFG_STEP("setAutoNAVHPPOSECEF", myGNSS.setAutoNAVHPPOSECEF(true));
     byte rate = myGNSS.getNavigationFrequency(); // Get the update rate of this module
     DBG.print(F("Current update rate: "));
     DBG.println(rate);
 
-    response &= myGNSS.setNMEAGPGGAcallbackPtr(&callbackGPGGA); // Set up the callback for GPGGA
+    GNSS_CFG_STEP("setNMEAGPGGAcallbackPtr", myGNSS.setNMEAGPGGAcallbackPtr(&callbackGPGGA)); // fails only on RAM alloc
     // GGA every 10th nav epoch = 1/s at 10 Hz. This doubles as the
     // receiver-liveness signal (lastGgaHeard_ms), so keep it ~1 Hz.
-    response &= myGNSS.setVal8(UBLOX_CFG_MSGOUT_NMEA_ID_GGA_I2C, 10);
+    GNSS_CFG_STEP("setVal8(MSGOUT_GGA)", myGNSS.setVal8(UBLOX_CFG_MSGOUT_NMEA_ID_GGA_I2C, 10));
+#undef GNSS_CFG_STEP
 
-    return response;
+    return NULL;
 }
 
 bool setupGNSS()
@@ -579,15 +587,35 @@ bool setupGNSS()
 
     Wire1.setClock(I2C_FREQUENCY_400K);
 
-    bool gnssFailEmitted = false;
-    while (!configureGNSS())
+    bool notDetectedEmitted = false;  // one event per setup, not per retry
+    bool configRetryEmitted = false;
+    const char *failedStep;
+    while ((failedStep = configureGNSS()) != NULL)
     {
-      DBG.println(F("u-blox GNSS not detected at default I2C address. Please check wiring. Freezing loop."));
-      if (!gnssFailEmitted)
+      if (strcmp(failedStep, "begin") == 0)
       {
-        gnssFailEmitted = true;
-        // Severity 3: without the ZED-F9P there is no positioning at all.
-        telemetryEmitError(3, "i2c_gnss_not_detected", "ZED-F9P begin() failing, check wiring");
+        DBG.println(F("ZED-F9P not answering at its I2C address, check wiring. Retrying."));
+        if (!notDetectedEmitted)
+        {
+          notDetectedEmitted = true;
+          // Severity 3: without the ZED-F9P there is no positioning at all.
+          telemetryEmitError(3, "i2c_gnss_not_detected", "ZED-F9P begin() failing, check wiring");
+        }
+      }
+      else
+      {
+        // The module is there (begin() passed) but did not ACK one config
+        // write. Retrying the whole configuration has always cleared it;
+        // this is not a wiring fault and must not raise the fatal code
+        // (it did until 2026-09-11: a false sev-3 alert on every boot).
+        DBG.printf("ZED-F9P config step %s not acknowledged, retrying\n", failedStep);
+        if (!configRetryEmitted)
+        {
+          configRetryEmitted = true;
+          char msg[64];
+          snprintf(msg, sizeof(msg), "config step %s not acked, retrying", failedStep);
+          telemetryEmitError(1, "gnss_config_retry", msg);
+        }
       }
       blinkOneTime(500, false);
     }
@@ -915,7 +943,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         uint32_t silentFor_s = (millis() - lastGgaHeard_ms) / 1000;
         const char *action = "skipped (mutex busy)";
         bool attempted = false;
-        bool configured = false;
+        const char *failedStep = NULL;  // configureGNSS() result, valid if attempted
         phase_ms = millis();
         if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_RECOVERY_MUTEX_MS)))
         {
@@ -925,19 +953,19 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           {
             case 0:
               action = "reconfigure";
-              configured = configureGNSS();
+              failedStep = configureGNSS();
               break;
             case 1:
               action = "sw reset";
               myGNSS.softwareResetGNSSOnly();
               vTaskDelay(2000/portTICK_PERIOD_MS);  // module restart time
-              configured = configureGNSS();
+              failedStep = configureGNSS();
               break;
             default:
               action = "hard reset";
               myGNSS.hardReset();  // cold start: last resort, loses ephemeris
               vTaskDelay(2000/portTICK_PERIOD_MS);
-              configured = configureGNSS();
+              failedStep = configureGNSS();
               break;
           }
           xSemaphoreGive(mutexSem);
@@ -948,9 +976,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           mutexWaitMs += millis() - phase_ms;
         }
         char msg[96];
-        snprintf(msg, sizeof(msg), "receiver silent %u s, recovery #%u: %s%s",
+        snprintf(msg, sizeof(msg), "receiver silent %u s, recovery #%u: %s%s%s",
                  (unsigned)silentFor_s, (unsigned)gnssRecoveryCount, action,
-                 !attempted ? "" : (configured ? " ok" : " (module not answering)"));
+                 !attempted ? "" : (failedStep == NULL ? " ok" : " failed at "),
+                 (attempted && failedStep != NULL) ? failedStep : "");
         telemetryEmitError(2, "gnss_degraded", msg);
         DBG.printf("gnss_degraded: %s\n", msg);
         // Deliberate maintenance (includes the 2 s reset wait), not a stall.

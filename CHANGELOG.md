@@ -61,6 +61,15 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ### Fixed
 
+- A false `i2c_gnss_not_detected` (severity 3) on boots where the ZED-F9P
+  answered `begin()` but did not acknowledge one of the configuration
+  writes on the first pass (2 of 2 captures on 2026-09-11; the retry always
+  succeeded). `configureGNSS()` now returns the name of the failing step
+  instead of a bare false. `setupGNSS()` raises the fatal code only when
+  `begin()` itself fails; an unacknowledged write is retried as before and
+  reported once per setup as `gnss_config_retry` (severity 1, `msg` names
+  the step). The recovery ladder's `gnss_degraded` message names the
+  failing step too.
 - The association backoff no longer outlasts the hotspot coming back. The ladder
   added in 0.46.1 doubled on elapsed time alone, so a unit could sit out a 60 s
   cooldown with the hotspot already up and visible. Any change in
