@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+[0.46.1] - 2026-09-11
+
 ### Changed
 
 - **BLE no longer waits for WiFi** (`setup()` in `main.cpp`). `setupBLE()` used to
