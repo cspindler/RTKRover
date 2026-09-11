@@ -76,7 +76,6 @@
 =================================================================================
 */
 #define DEVICE_TYPE                  "rtkrover"
-#define DEFAULT_KEY                  "12345678"
 // Cap radio TX power from the first radio-on. The default 19.5 dBm draws
 // TX spikes big enough to brown out the 3V3 rail on battery power (boot
 // loop until WiFi init, observed in field tests 2026-08). The hotspot is
@@ -98,7 +97,6 @@
                                 BLE settings
 =================================================================================
 */
-#define PAYLOAD_BUF_LEN              20
 #define SERVICE_UUID                            "713D0000-503E-4C75-BA94-3148F18D941E"
 // Binary heading frame:
 // ..0002 is the RWAHT firmware's legacy ASCII heading (this firmware no longer has it);
@@ -145,7 +143,6 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
 #define BNO080_I2C_ADDR                 0x4B
 #define BNO080_SDA_PIN                  23
 #define BNO080_SCL_PIN                  22
-#define I2C_FREQUENCY_100K              100000  // 100 kHz
 #define I2C_FREQUENCY_400K              400000  // 400 kHz
 #define BNO080_ROT_VECT_UPDATE_RATE_MS  10      // Time between sensor readings
 #define BNO080_LIN_ACCEL_UPDATE_RATE_MS 10      // 100 Hz
@@ -154,7 +151,6 @@ BUT: we use here two I2C connections for real parallel computing on two cores.
                                                 // (rotation + lin accel @ 100 Hz);
                                                 // the cap keeps a burst from
                                                 // starving the notify cadence
-#define BNO080_STEP_CNT_UPDATE_RATE_MS  32      // 31.25 Hz lt. datasheet
 
 /*
 =================================================================================
