@@ -37,11 +37,6 @@ Naming convention (the full glossary is PROJECT-PLAN.md §1.1):
   refnet reference station), not a name for the hardware. It survives in
   the firmware name *rtk-rover* only.
 
-### Dependencies (currently not in use)
-
-* [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer)
-* [RTKRoverManager](https://github.com/jangleboom/RTKRoverManager)
-
 ### Circuit diagram
 
 ![plot](./fritzing/RTKRover_bb.jpg)
