@@ -34,6 +34,22 @@ bool setupWiFi();
 bool setupStationMode(const char* ssid, const char* password);
 
 /**
+ * @brief Block until WiFi is associated, running the reconnect ladder.
+ *
+ * Returns immediately when already associated. Otherwise waits SOFTLY:
+ * auto-reconnect is on, so the driver keeps retrying by itself; every
+ * WIFI_RECONNECT_NUDGE_MS (doubling to WIFI_RECONNECT_NUDGE_MAX_MS, reset on
+ * any status change) it kicks it with WiFi.reconnect(), and only after
+ * WIFI_REINIT_AFTER_MS without association (or WIFI_REINIT_AFTER_FAILED_MS in
+ * WL_CONNECT_FAILED) does it fall back to a full setupStationMode(). Emits
+ * one `wifi_disconnected` error per outage once it outlives
+ * WIFI_LOSS_REPORT_AFTER_MS. Blinks the 1.0 s / 0.1 s code while waiting.
+ *
+ * @return true if it had to wait (the caller's clocks are stale)
+ */
+bool wifiEnsureAssociated();
+
+/**
  * @brief Generate a unique device name using a prefix and chip ID
  *
  * This function creates a unique device name by combining a given prefix

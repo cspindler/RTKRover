@@ -48,6 +48,26 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   now `ntrip iter N ms` / `updatePosition held mutex N ms`. Same `code` string,
   same threshold and rate limit, so the Grafana dimension is unchanged. −300 B.
 
+- **`task_rtk_get_corrrection_data` split by concern** (was one 670-line
+  function interleaving four of them; now ~380 lines that read top to bottom).
+  No behaviour change:
+  - `wifiEnsureAssociated()` in `handle_wifi.cpp` owns the WiFi reconnect ladder
+    (nudge / doubling backoff / full re-init escape hatch / `wifi_disconnected`
+    after the grace) and returns whether it waited. The WiFi module now owns
+    association at runtime, not only at boot.
+  - `gnssRecoveryTick()` next to `configureGNSS()` owns receiver-silence
+    detection and the reconfigure → software reset → hard reset ladder, with
+    its stage / count / last-attempt state as statics; returns whether it ran a
+    recovery so the caller can exclude it from the stall clock.
+  - `gnssCheckUbloxLocked(timeout)` replaces the two byte-identical bounded
+    `checkUblox` blocks; `ntripBuildRequest()` builds the GET + Basic-auth
+    request into the caller's buffer and reports overflow.
+  - The five copies of the backoff arming and the three `outageErrorEmitted`
+    guards are two lambdas (`armBackoff`, `emitOutageError`) over the task's
+    own state.
+  - `blinkOneTime()` / `ledInit()` moved to `src/led.{h,cpp}` so the WiFi module
+    can blink its 1.0 s / 0.1 s code without reaching into `main.cpp`.
+
 ## [Unreleased - lean pass part 1]
 
 ### Changed

@@ -1,7 +1,7 @@
 # rtk-rover runtime architecture
 
-What actually runs on the ESP32, from `src/main.cpp`, `src/ble_link.cpp` and
-`src/telemetry/`.
+What actually runs on the ESP32, from `src/main.cpp`, `src/ble_link.cpp`,
+`src/handle_wifi.cpp` and `src/telemetry/`.
 Constants live in `src/RTKRoverConfig.h` (FreeRTOS section); keep this table in
 step with them.
 
@@ -9,7 +9,7 @@ step with them.
 
 | Task | Core | Prio | Period | Stack | Does |
 |---|---|---|---|---|---|
-| `task_rtk_get_corrrection_data` | 0 | 2 | 1000 ms | 9 KB | WiFi association ladder, GNSS receiver watchdog and recovery ladder, NTRIP session: RTCM from the caster pushed to the ZED-F9P, GGA pushed to the caster every 10 s. |
+| `task_rtk_get_corrrection_data` | 0 | 2 | 1000 ms | 9 KB | Per iteration: `gnssRecoveryTick()` (receiver watchdog + recovery ladder), `wifiEnsureAssociated()` while the caster is disconnected (the WiFi reconnect ladder, in `handle_wifi.cpp`), then the NTRIP session: connect gates, backoff, RTCM from the caster pushed to the ZED-F9P, GGA pushed to the caster every 10 s. |
 | `task_rtk_get_rover_position` | 0 | 2 | 100 ms | 4 KB | `updatePosition()` under `mutexSem`: reads the streamed NAV packets, posts the coordinate to `xQueueCoord`, emits the 1 Hz `gnss_fix` event. |
 | `task_bno_orientation_via_ble` | 1 | 3 | 10 ms | 4 KB | Drains the BNO080 FIFO to the newest report, puts one binary heading frame on `713D0005` per BLE connection event, emits `imu_status` every 60 s. Highest priority in the system. |
 | `task_send_rtk_position_via_ble` | 1 | 2 | 100 ms | 4 KB | Pops `xQueueCoord`, notifies the ASCII position on `713D0004`. |
@@ -53,7 +53,8 @@ IMU faults become visible only once a phone connects (matches the `imu_status` c
 
 ## Callback contexts
 
-- `callbackGPGGA` runs inside `myGNSS.checkCallbacks()` on the NTRIP task.
+- `callbackGPGGA` runs inside `myGNSS.checkCallbacks()` on the NTRIP task (directly
+  and via `gnssCheckUbloxLocked()`).
 - The BLE server callbacks and custom GAP/GATTS handlers (`ble_link.cpp`) and the
   telemetry CTRL `onWrite` run on the Bluedroid BTC task: they only set atomics,
   toggle advertising and return.
