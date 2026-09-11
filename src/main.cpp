@@ -222,12 +222,6 @@ SFE_UBLOX_GNSS myGNSS;
 bool setupGNSS(void);
 
 /**
- * @brief Start the
- *
- */
-void beginClient(void);
-
-/**
  * @brief Get the Position
  *
  */
@@ -294,12 +288,6 @@ void xQueueSetup(void);
  * @param doNotBlock      Type of delay between blinking
  */
 void blinkOneTime(int blinkTime, bool doNotBlock);
-
-/**
- * @brief Deletes WiFi station SSID and PW from LittleFS
- *
- */
-void wipeWiFiCredentials(void);
 
 /**
  * @brief Report why the chip last reset. Abnormal causes (brownout, panic,
