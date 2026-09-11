@@ -27,7 +27,9 @@
 #include <WiFiUdp.h> // hotspot path warmer (warmHotspotPath)
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
-#include <TestsRTKRover.h>
+#ifdef TESTING
+#include <TestsRTKRover.h>  // AUnit suites; debug builds only
+#endif
 
 /*
 =================================================================================

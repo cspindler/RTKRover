@@ -1,22 +1,11 @@
 #ifndef TESTS_RTK_ROVER_MANAGER_H
 #define TESTS_RTK_ROVER_MANAGER_H
 
+// Aggregates the AUnit suites. Included from main.cpp under #ifdef TESTING
+// (debug builds), run from setup(); the production image links no AUnit.
 #include <AUnit.h>
 using namespace aunit;
 
-// Just to test the test file
-test(correct) {
-  int x = 1;
-  assertEqual(x, 1);
-}
-
-test(incorrect) {
-  int x = 2;
-  assertNotEqual(x, 1);
-}
-
-#ifdef TESTING
 #include "telemetry/TestsTelemetry.h"
-#endif
 
 #endif /*** TESTS_RTK_ROVER_MANAGER_H ***/
