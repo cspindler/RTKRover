@@ -200,8 +200,6 @@ void setupBNO080(void);
                                 GNSS
 =================================================================================
 */
-long lastTime = 0; //Simple local timer. Limits amount if I2C traffic to Ublox module.
-
 // The ESP32 core has a built in base64 library but not every platform does
 // We'll use an external lib if necessary.
 #if defined(ARDUINO_ARCH_ESP32)
