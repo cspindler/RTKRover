@@ -1589,13 +1589,12 @@ void task_send_rtk_position_via_ble(void *pvParameters)
 {
   (void)pvParameters;
 
-  String latLonStr((char *)0);
-  // Latitude: 9, delimiter: 1, latitudeHp: 2, longitude: 9, delimiter: 1, longitudeHp: 2,
-  latLonStr.reserve(27);
-
   coord_t coord;
-  int32_t lat, lon;
-  int8_t latHp, lonHp;
+  // "<lat> <latHp> <lon> <lonHp>", decimal, space-separated (the 713D0004 wire
+  // format). Worst case "-1234567890 -99 -1234567890 -99" = 27 chars + NUL.
+  // Stack buffer, not String: this ran at 10 Hz on a heap with a measured
+  // 1.8 kB minimum, allocating four temporaries per notification.
+  char latLonStr[32];
 
   while (!bleConnected) blinkOneTime(100, true);
 
@@ -1613,21 +1612,13 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         DBG.print(coord.lon);
         DBG.print(F(", coord.lonHp = "));
         DBG.println(coord.lonHp);
-        lat = coord.lat;
-        latHp = coord.latHp;
-        lon = coord.lon;
-        lonHp = coord.lonHp;
-
-        // Send coords
-        latLonStr = String(lat);
-        latLonStr += DATA_STR_DELIMITER;
-        latLonStr += String(latHp);
-        latLonStr += DATA_STR_DELIMITER;
-        latLonStr += String(lon);
-        latLonStr += DATA_STR_DELIMITER;
-        latLonStr += String(lonHp);
-        // DBG.print(F("latLonStr.length(): "));DBG.println(latLonStr.length());
-        pRealtimeKinematicsCharacteristic->setValue(latLonStr.c_str());
+        // Send coords: identical bytes to the previous String concatenation.
+        int n = snprintf(latLonStr, sizeof(latLonStr),
+                         "%ld" DATA_STR_DELIMITER "%d" DATA_STR_DELIMITER
+                         "%ld" DATA_STR_DELIMITER "%d",
+                         (long)coord.lat, (int)coord.latHp,
+                         (long)coord.lon, (int)coord.lonHp);
+        pRealtimeKinematicsCharacteristic->setValue((uint8_t *)latLonStr, (size_t)n);
         pRealtimeKinematicsCharacteristic->notify();
       }
 
