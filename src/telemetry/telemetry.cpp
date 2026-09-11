@@ -105,9 +105,13 @@ void telemetryNotePositionLoop()
   positionLoops.fetch_add(1, std::memory_order_relaxed);
 }
 
+// RTCM bytes pushed to the receiver since the previous heartbeat (key 21):
+// with corr_age_ms, the device-side proof that corrections arrive.
+static std::atomic<uint32_t> rtcmBytesInterval{0};
+
 bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, uint32_t battMv)
 {
-  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 8);
+  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 9);
   b.w.key(TELEM_HB_UPTIME_MS);
   b.w.uintVal(millis());
   b.w.key(TELEM_HB_FREE_HEAP);
@@ -122,6 +126,8 @@ bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, uint32_t battMv
   b.w.uintVal(positionLoops.exchange(0, std::memory_order_relaxed));
   b.w.key(TELEM_HB_LOOPS_CORR);
   b.w.uintVal(correctionsLoops.exchange(0, std::memory_order_relaxed));
+  b.w.key(TELEM_HB_RTCM_BYTES);
+  b.w.uintVal(rtcmBytesInterval.exchange(0, std::memory_order_relaxed));
   // batt_mv stays the last pair: frame_heartbeat_carries_batt_mv asserts it.
   b.w.key(TELEM_HB_BATT_MV);
   b.w.uintVal(battMv);
@@ -158,9 +164,9 @@ static std::atomic<bool> rtcmEverReceived{false};
 
 void telemetryNoteRtcmPushed(uint32_t numBytes)
 {
-  (void)numBytes;
   lastRtcmMs.store(millis(), std::memory_order_relaxed);
   rtcmEverReceived.store(true, std::memory_order_relaxed);
+  rtcmBytesInterval.fetch_add(numBytes, std::memory_order_relaxed);
 }
 
 uint32_t telemetryCorrAgeMs()

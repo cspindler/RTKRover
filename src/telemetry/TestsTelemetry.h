@@ -319,9 +319,10 @@ test(frame_heartbeat_carries_batt_mv)
                         sizeof(want)));
 }
 
-test(frame_heartbeat_carries_heap_min_and_loop_counters)
+test(frame_heartbeat_carries_heap_min_and_interval_counters)
 {
-  // First heartbeat resets the loop counters (read-and-reset), then discard it.
+  // First heartbeat resets the interval counters (read-and-reset), then
+  // discard it.
   telemetryEmitHeartbeat(123456, 9876, 3900);
   drainTelemetry();
 
@@ -330,6 +331,8 @@ test(frame_heartbeat_carries_heap_min_and_loop_counters)
   telemetryNoteCorrectionsLoop();
   telemetryNotePositionLoop();
   telemetryNotePositionLoop();
+  telemetryNoteRtcmPushed(1000);
+  telemetryNoteRtcmPushed(24);
   assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
@@ -340,17 +343,20 @@ test(frame_heartbeat_carries_heap_min_and_loop_counters)
   const uint8_t wantHeapMin[] = {TELEM_HB_HEAP_MIN, 0x19, 0x26, 0x94};
   assertTrue(containsBytes(frame, n, wantHeapMin, sizeof(wantHeapMin)));
 
-  // Adjacent pairs: loops_pos (key 19) = 2, loops_corr (key 20) = 3
-  const uint8_t wantLoops[] = {TELEM_HB_LOOPS_POS, 0x02,
-                               TELEM_HB_LOOPS_CORR, 0x03};
-  assertTrue(containsBytes(frame, n, wantLoops, sizeof(wantLoops)));
+  // Adjacent pairs: loops_pos (key 19) = 2, loops_corr (key 20) = 3,
+  // rtcm_bytes (key 21) = 1024 = 0x0400 as a 2-byte uint
+  const uint8_t wantCounters[] = {TELEM_HB_LOOPS_POS, 0x02,
+                                  TELEM_HB_LOOPS_CORR, 0x03,
+                                  TELEM_HB_RTCM_BYTES, 0x19, 0x04, 0x00};
+  assertTrue(containsBytes(frame, n, wantCounters, sizeof(wantCounters)));
 
   // Read-and-reset: the next heartbeat reports zeros.
   assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
   n = telemetryPopFrame(frame, sizeof(frame));
   assertMore(n, (size_t)4);
   const uint8_t wantZeros[] = {TELEM_HB_LOOPS_POS, 0x00,
-                               TELEM_HB_LOOPS_CORR, 0x00};
+                               TELEM_HB_LOOPS_CORR, 0x00,
+                               TELEM_HB_RTCM_BYTES, 0x00};
   assertTrue(containsBytes(frame, n, wantZeros, sizeof(wantZeros)));
 }
 

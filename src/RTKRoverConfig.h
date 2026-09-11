@@ -71,6 +71,7 @@
 // apps: neither may be reused (PROJECT-PLAN.md par. 5).
 #define HEADTRACKER_BIN_CHARACTERISTIC_UUID     "713D0005-503E-4C75-BA94-3148F18D941E"
 #define REALTIME_KINEMATICS_CHARACTERISTIC_UUID "713D0004-503E-4C75-BA94-3148F18D941E"
+#define RTCM_CHARACTERISTIC_UUID                "713D0006-503E-4C75-BA94-3148F18D941E"  // app -> assembly, write w/o response (ADR-001)
 #define TELEMETRY_SERVICE_UUID                  "713D0100-503E-4C75-BA94-3148F18D941E"
 #define TELEMETRY_TX_CHARACTERISTIC_UUID        "713D0101-503E-4C75-BA94-3148F18D941E"
 #define TELEMETRY_CTRL_CHARACTERISTIC_UUID      "713D0102-503E-4C75-BA94-3148F18D941E"
@@ -114,7 +115,7 @@
 #define TASK_TELEMETRY_PRIORITY                         1
 #define TASK_RTK_GET_POSITION_INTERVAL_MS             100  // position read + 713D0004 notify
 #define TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS       10  // = sensor report rate, or the FIFO backs up
-#define TASK_GNSS_CORRECTIONS_INTERVAL_MS             100  // NMEA callbacks + receiver watchdog
+#define TASK_GNSS_CORRECTIONS_INTERVAL_MS             100  // RTCM FIFO drain, NMEA callbacks, receiver watchdog
 #define MIN_ACCEPTABLE_ACCURACY_MM                   8000  // 713D0004 goes quiet above this (app falls
                                                            // back to internal GPS)
 #define NAVIGATION_FREQUENCY_HZ                        10  // 20 Hz is GPS-only on the F9P and wedged
@@ -131,6 +132,14 @@
 #define GNSS_RECOVERY_GAP_MS        60000  // min spacing between recovery attempts
 #define GNSS_RECOVERY_MUTEX_MS       5000  // mutex bound for the recovery I2C work
 #define GNSS_MUTEX_TIMEOUT_MS        2000  // corrections task's bounded mutex takes: skip the I2C, keep going
+
+/*
+=================================================================================
+                Corrections over BLE (ADR-001, PROJECT-PLAN.md par. 5.6)
+=================================================================================
+*/
+#define CORRECTIONS_RTCM_FIFO_SIZE   4096  // chunk FIFO, drop-oldest: ~3 VRS epochs, rides out a mutex stall
+#define CORRECTIONS_RTCM_CHUNK_MAX    520  // one write payload: ATT MTU - 3 (517 on iOS), rounded up
 
 /*
 =================================================================================

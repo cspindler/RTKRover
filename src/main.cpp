@@ -27,6 +27,7 @@
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
 #include <ble_link.h>
+#include <corrections.h>
 #ifdef TESTING
 #include <TestsRTKRover.h>  // AUnit suites; debug builds only
 #endif
@@ -162,8 +163,9 @@ static bool updatePosition(coord_t *out);
 static xSemaphoreHandle mutexSem;
 
 /**
- * @brief Task for the receiver's correction side: dispatches the NMEA
- *        callbacks and runs the receiver watchdog (recovery ladder).
+ * @brief Task for the receiver's correction side: pushes the RTCM chunks the
+ *        phone wrote (corrections.cpp FIFO) into the receiver, dispatches the
+ *        NMEA callbacks and runs the receiver watchdog (recovery ladder).
  *
  * @param pvParameters Void pointer, no parameter used here
  */
@@ -708,6 +710,52 @@ void task_gnss_corrections(void *pvParameters)
 
     if (gnssRecoveryTick()) iterStart_ms = millis();
 
+    // --- RTCM downlink: FIFO -> receiver ------------------------------------
+    // One bounded mutex take per iteration, then every queued chunk goes to
+    // the receiver with the raw push (RTCM3 is self-delimiting: no framing,
+    // no reassembly). On a timeout nothing is popped: the chunks wait, and
+    // the FIFO's drop-oldest at CORRECTIONS_RTCM_FIFO_SIZE (~3 VRS epochs)
+    // means a slow-I2C stretch on the position task costs the oldest
+    // corrections, never the newest.
+    if (correctionsRtcmQueued())
+    {
+      if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
+      {
+        uint8_t rtcm[CORRECTIONS_RTCM_CHUNK_MAX];
+        size_t n;
+        while ((n = correctionsPopRtcm(rtcm, sizeof(rtcm))) > 0)
+        {
+          myGNSS.pushRawData(rtcm, n, false);
+          telemetryNoteRtcmPushed(n);  // feeds corr_age_ms + heartbeat rtcm_bytes
+          DBG.printf("RTCM pushed to ZED: %u\n", (unsigned)n);
+        }
+        xSemaphoreGive(mutexSem);
+      }
+      else
+      {
+        DBG.println(F("RTCM push deferred (mutex busy)"));
+      }
+    }
+
+    // Chunks the FIFO evicted unpushed: the receiver side is not draining
+    // (wedged bus, mutex held for seconds). A correction-delivery problem on
+    // the assembly, so its own alert dimension; rate-limited like the stall.
+    static uint32_t rtcmDroppedReported = 0;
+    const uint32_t rtcmDropped = correctionsRtcmDropped();
+    if (rtcmDropped != rtcmDroppedReported)
+    {
+      static uint32_t lastDropEmit_ms = 0;
+      if (millis() - lastDropEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
+      {
+        lastDropEmit_ms = millis();
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%u RTCM chunks evicted unpushed",
+                 (unsigned)(rtcmDropped - rtcmDroppedReported));
+        telemetryEmitError(1, "rtcm_fifo_overflow", msg);
+        rtcmDroppedReported = rtcmDropped;
+      }
+    }
+
     // gnss_pipe_stall: a whole iteration over threshold is reported. The
     // 2026-08-21/24 causes (20 Hz nav rate, polled getters, unbounded mutex
     // takes) are fixed; the event stays as a "something is slow" alarm.
@@ -748,6 +796,9 @@ void setupBLE(void)
   pRealtimeKinematicsCharacteristic = pService->createCharacteristic(
     REALTIME_KINEMATICS_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
+
+  // The correction loop (RTCM down), ADR-001.
+  correctionsBleSetup(pService);
 
   pService->start();
 

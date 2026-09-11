@@ -57,6 +57,7 @@ enum TelemetryHeartbeatKey : uint8_t {
   // 18 = loops_ntrip: retired 0.48.0 with the NTRIP task, never reuse
   TELEM_HB_LOOPS_POS       = 19,  // uint, position-task loop iterations since last heartbeat
   TELEM_HB_LOOPS_CORR      = 20,  // uint, corrections-task loop iterations since last heartbeat
+  TELEM_HB_RTCM_BYTES      = 21,  // uint, RTCM bytes pushed to the receiver since last heartbeat
 };
 
 // imu_status (type 4)

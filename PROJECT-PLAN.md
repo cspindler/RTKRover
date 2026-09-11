@@ -233,6 +233,7 @@ assembly; absent for `phone`).
 | `heap_min` | lowest free heap since boot (bytes). Together with `free_heap` it bounds the between-heartbeat transients that point samples miss (added for the 2026-08-21 underrun diagnosis) |
 | `loops_corr`, `loops_pos` | corrections-task / position-task loop iterations completed since the previous heartbeat (healthy: ~150 / ~150 per 15 s). A collapse toward 1 is the GNSS-pipeline-slowdown signature (see the `gnss_pipe_stall` error). Firmware ≤ 0.47 sent `loops_ntrip` (the NTRIP task, ~15 per 15 s) instead of `loops_corr` |
 | `batt_mv` | LiPo pack voltage in mV, read from the Feather's 2:1 divider on A13 (ADC1). Single-cell: ~4200 full, ~3300 empty. 0 = unknown. Consumers derive a percentage; the firmware ships no discharge curve |
+| `rtcm_bytes` | RTCM bytes pushed into the receiver since the previous heartbeat (0.48.0; bytes/s = value / 15). 0 while no phone is connected or the app has no caster session. With `corr_age_ms` in `gnss_fix`, the assembly-side proof that corrections reach the receiver |
 
 Retired with ADR-001 (firmware ≤ 0.47 sent them; never reused): `wifi_rssi` (hotspot link
 quality) and `ntrip_connected`. The caster session is the app's now, so its state lives in
@@ -263,6 +264,7 @@ The codes are part of the contract (they will be alert labels). What the firmwar
 | --- | --- | --- |
 | `gnss_pipe_stall` | 1 | a GNSS-pipeline step ran over threshold (5 s): one corrections-task iteration or one position-task `updatePosition` mutex hold (`msg` carries the time). Diagnosis instrumentation for the 2026-08 slowdowns; rate-limited to one per 10 s per site |
 | `gnss_degraded` | 2 | the receiver produced no GGA for 30 s (mute module, bench 4.1 2026-08-24) and a recovery-ladder rung ran: `msg` carries silence duration, attempt number and action (reconfigure → sw reset → hard reset) |
+| `rtcm_fifo_overflow` | 1 | RTCM chunks the app wrote (§5.6) were evicted before reaching the receiver: the corrections task could not take the GNSS mutex for seconds, so corrections arrive but do not get through on the assembly. `msg` carries the count since the last report; rate-limited to one per 10 s |
 | `gnss_config_retry` | 1 | the receiver answered `begin()` but did not acknowledge one configuration write during setup; the whole configuration is retried and `msg` names the step. Not a wiring fault (until 0.46.2 this raised `i2c_gnss_not_detected` instead) |
 | `i2c_bus_rtk_failed` | 3 | the sensor bus would not start |
 | `i2c_bno080_not_detected` | 3 | head-tracking IMU not answering |
@@ -320,13 +322,14 @@ Same vendor family as the existing tracker service (`713D0000-...`), new service
 | TX (notify) | `713D0101-503E-4C75-BA94-3148F18D941E` |
 | CTRL (write) | `713D0102-503E-4C75-BA94-3148F18D941E` |
 
-Tracker service (`713D0000-...`), all notify-only:
+Tracker service (`713D0000-...`), notify-only except where marked:
 
 | | UUID | |
 | --- | --- | --- |
 | Heading, binary (§5.5) | `713D0005-503E-4C75-BA94-3148F18D941E` | rtk-rover >= 0.46.0; RWAHT ≥ 0.3.0 |
 | Heading, ASCII (legacy) | `713D0002-503E-4C75-BA94-3148F18D941E` | RWAHT (all versions); rtk-rover <= 0.45.x |
 | Raw position | `713D0004-503E-4C75-BA94-3148F18D941E` | rtk-rover |
+| RTCM downlink, **write** (§5.6) | `713D0006-503E-4C75-BA94-3148F18D941E` | rtk-rover ≥ 0.48.0; app → assembly |
 | *(reserved)* | `713D0003-503E-4C75-BA94-3148F18D941E` | historic `TRACKERSERVICERX`, never reuse |
 
 The telemetry service is **not advertised**: the 31-byte advertisement is
@@ -402,6 +405,7 @@ Type-specific keys start at 10 (`type` disambiguates, so numbers repeat across t
 | | 18 | *(retired 0.48.0: `loops_ntrip`)* | |
 | | 19 | `loops_pos` | uint |
 | | 20 | `loops_corr` | uint |
+| | 21 | `rtcm_bytes` | uint |
 | `ntrip_status` | – | *(type retired on the BLE leg; keys 10–12 were `state` / `reconnects` / `bytes_rx`)* | |
 | `imu_status` | 10 | `calib_status` | uint |
 | | 11 | `report_rate_hz` | float |
@@ -479,6 +483,26 @@ elevation_deg = -atan2(2(qj \* qk + qi \* qw), −qi^2 − qj^2 + qk^2 + qw^2)  
 linAccelZ_ms2 = linAccelZ / 100
 ```
 
+### 5.6 Corrections over BLE (ADR-001, rtk-rover ≥ 0.48.0)
+
+The app is the NTRIP client (§6 item 6); the assembly is a pure BLE peripheral. The
+correction loop rides on the tracker service:
+
+| | UUID | direction | property |
+| --- | --- | --- | --- |
+| RTCM downlink | `713D0006-503E-4C75-BA94-3148F18D941E` | app → assembly | write without response (write with response is accepted too) |
+
+**RTCM downlink.** The app writes the caster's byte stream as it arrives, each write
+carrying the next bytes of the stream in order, at most ATT MTU − 3 bytes per write (514 at
+the MTU 517 iOS negotiates, 182 at 185). No framing, no length prefix, no alignment to RTCM
+message boundaries: RTCM3 is self-delimiting (preamble, length, CRC) and the receiver
+resyncs on it. Nothing is acknowledged; the app must not wait for anything before the next
+write. On the assembly each chunk lands in a 4 KB drop-oldest FIFO (~3 VRS epochs) and is
+pushed to the ZED-F9P over I²C by the corrections task; `rtcm_bytes` in `heartbeat` and
+`corr_age_ms` in `gnss_fix` prove the bytes reached the receiver, `rtcm_fifo_overflow`
+(§4.3) reports chunks that did not. Wire load: VRS epochs are 1.0–1.4 KB at 1 Hz, i.e.
+6–8 writes per second at MTU 185, well inside one connection interval.
+
 ---
 
 ## 6. App responsibilities (rwa-player)
@@ -494,10 +518,9 @@ linAccelZ_ms2 = linAccelZ / 100
 5. Surface assembly health minimally in a debug screen (last fix quality, NTRIP state,
    connected assembly kind and id).
 6. **NTRIP client** (ADR-001): hold the caster session over cellular with the unit's
-   credentials (a setting next to Unit ID; the firmware embeds none), forward the RTCM
-   stream to the assembly and the assembly's GGA to the caster (§5.6), seed GGA from
-   CoreLocation until the assembly delivers one, and report the session as
-   `ntrip_status` events plus `heartbeat.ntrip_connected` (`source` = `phone`).
+   credentials (a setting next to Unit ID; the firmware embeds none), write the RTCM
+   stream to the assembly (§5.6), send GGA to the caster every ~10 s, and report the
+   session as `ntrip_status` events plus `heartbeat.ntrip_connected` (`source` = `phone`).
 
 ---
 

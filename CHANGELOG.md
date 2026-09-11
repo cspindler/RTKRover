@@ -13,6 +13,27 @@ ADR-001: BLE-only transport, NTRIP proxied through the phone
 (`ADR-001-ble-only-transport.md`). Breaking for rwa-player: the app becomes
 the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
 
+### Added
+
+- **RTCM downlink over BLE: `713D0006`, write without response** (ADR-001
+  par. 2; PROJECT-PLAN.md par. 5.6). The app writes the caster's byte stream
+  in MTU-sized chunks. `src/corrections.{h,cpp}` takes each write on the
+  Bluedroid task into a 4 KB drop-oldest chunk FIFO (the telemetry ring's
+  class, reused: same "producer never blocks, single consumer" contract),
+  and `task_gnss_corrections` pushes the queued chunks to the ZED-F9P with
+  `pushRawData` under one bounded mutex take per 100 ms iteration. On a
+  mutex timeout nothing is popped, so a slow-I2C stretch on the position
+  task costs the *oldest* corrections, never the newest. RTCM3 is
+  self-delimiting, so no framing on the BLE layer and no reassembly. The
+  ADR's "straight to the receiver" holds in spirit, not in execution
+  context: pushing from the write callback would put I2C and the GNSS mutex
+  on the BT task, which also carries the heading notifies.
+  Telemetry: heartbeat key 21 `rtcm_bytes` (bytes pushed since the previous
+  heartbeat; bytes/s = value / 15), the assembly-side proof that corrections
+  reach the receiver next to `corr_age_ms`; error code `rtcm_fifo_overflow`
+  (severity 1, rate-limited to one per 10 s) when chunks were evicted
+  unpushed. The heartbeat AUnit test covers the new counter.
+
 ### Removed
 
 - **WiFi and the NTRIP client** (ADR-001 par. 2). The assembly no longer

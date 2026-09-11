@@ -38,8 +38,8 @@ struct TelemetryGnssFix
 
 bool telemetryEmitGnssFix(const TelemetryGnssFix &fix);
 /// heapMin = lowest free heap since boot (esp_get_minimum_free_heap_size()).
-/// The per-interval loop counters (telemetryNote*Loop) are read-and-reset
-/// internally by this call.
+/// The per-interval counters (telemetryNote*Loop, the RTCM byte count) are
+/// read-and-reset internally by this call.
 bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, uint32_t battMv);
 bool telemetryEmitImuStatus(uint8_t calibStatus, float reportRateHz,
                             uint32_t resets);
@@ -69,7 +69,7 @@ void telemetryNoteCorrectionsLoop();
 void telemetryNotePositionLoop();
 
 /// RTCM bookkeeping (par. 4.3): called after each pushRawData into the
-/// receiver; gnss_fix reads the age.
+/// receiver; gnss_fix reads the age, the heartbeat the bytes per interval.
 void telemetryNoteRtcmPushed(uint32_t numBytes);
 uint32_t telemetryCorrAgeMs();       // 0xFFFFFFFF = never received
 
