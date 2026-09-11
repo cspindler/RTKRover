@@ -9,6 +9,34 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- The association backoff no longer outlasts the hotspot coming back. The ladder
+  added in 0.46.1 doubled on elapsed time alone, so a unit could sit out a 60 s
+  cooldown with the hotspot already up and visible. Any change in
+  `WiFi.status()` now resets the ladder and retries at once: a changed status
+  means the radio picture changed. Backoff still applies while the status sits
+  unchanged, which is the case it was for.
+
+- `WL_CONNECT_FAILED` escalates to a full re-init after 30 s
+  (`WIFI_REINIT_AFTER_FAILED_MS`) instead of waiting out the 300 s wedged-driver
+  timeout. arduino-esp32 latches that status and stops its own auto-reconnect
+  for auth-class disconnect reasons, and `WiFi.reconnect()` only re-issues
+  `esp_wifi_connect()` into the same wedged config, so the soft path cannot
+  clear it. A status that merely passes *through* 4 while an iOS hotspot wakes
+  up (bench-4 oscillated 4↔6) does not trigger this; only a constant one does.
+
+- The nudge log line printed the delay that had just elapsed, labelled as the
+  next one. It now prints the real next delay plus free heap at the attempt.
+
+### Known issue
+
+- Association transiently costs ~10–13 kB of heap, and since the reorder it runs
+  at ~15 kB free instead of ~41 kB. Min-ever free heap reached **1836 B** during
+  association during testing. Association itself succeeds, but the margin is
+  thin enough that a concurrent Bluedroid GATT connection allocation is the
+  known connect-time OOM panic path.
+
 [0.46.1] - 2026-09-11
 
 ### Changed

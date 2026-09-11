@@ -232,6 +232,12 @@ the post-connect grace window, reconnect backoff, and bounded mutex takes.
 // sagging pack when the phone is simply switched off. Doubles per unanswered
 // nudge, resets when the outage ends or the driver is re-inited.
 #define WIFI_RECONNECT_NUDGE_MAX_MS 60000  // cap for the doubling nudge cadence
+                                           // (reset on any WiFi.status() change,
+                                           // so a hotspot appearing is not
+                                           // made to wait out a long cooldown)
+
+// Escape hatch for WL_CONNECT_FAILED.
+#define WIFI_REINIT_AFTER_FAILED_MS 30000
 
 // Grace before an outage becomes a `wifi_disconnected` event. Since the boot
 // no longer blocks on association (see setup()), the NTRIP task's outage loop
