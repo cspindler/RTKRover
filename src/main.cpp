@@ -36,7 +36,8 @@
                                 Bluetooth LE
 =================================================================================
 */
-float bleConnected = false; // TODO: deglobalize this
+// Written by the BLE server callbacks (BTC task), read by three tasks.
+volatile bool bleConnected = false; // TODO: deglobalize this
 
 // Fleet-configured BLE name (fleet-secrets.ini via CasterSecrets.h), empty on
 // placeholder builds -> fall back to the chip-id name.
