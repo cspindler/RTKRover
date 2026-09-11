@@ -15,7 +15,8 @@ semantics here without updating PROJECT-PLAN.md and the `rwa-player` decoder.
 
 ## Runtime architecture
 
-TODO, see [DOCUMENTATION.md]([./DOCUMENTATION.md]) for an attempt of documenting this.
+See [DOCUMENTATION.md](./DOCUMENTATION.md): task table (core, priority, period, stack),
+synchronisation primitives, boot order, callback contexts.
 
 ## Build & flash
 

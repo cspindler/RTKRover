@@ -1,103 +1,51 @@
-# RWA RTK Rover
+# rtk-rover runtime architecture
 
-## Key Aspects of the Task Scheduling
+What actually runs on the ESP32, from `src/main.cpp` and `src/telemetry/`.
+Constants live in `src/RTKRoverConfig.h` (FreeRTOS section); keep this table in
+step with them.
 
-### FreeRTOS Configuration
+## Tasks
 
-- 4 concurrent tasks running on a dual-core ESP32
-- Core 0: RTK correction data and position tasks (WiFi/GNSS heavy)
-- Core 1: BLE communication tasks (IMU and position transmission)
-- All tasks have Priority 2 (equal priority with time-slicing)
+| Task | Core | Prio | Period | Stack | Does |
+|---|---|---|---|---|---|
+| `task_rtk_get_corrrection_data` | 0 | 2 | 1000 ms | 9 KB | WiFi association ladder, GNSS receiver watchdog and recovery ladder, NTRIP session: RTCM from the caster pushed to the ZED-F9P, GGA pushed to the caster every 10 s. |
+| `task_rtk_get_rover_position` | 0 | 2 | 100 ms | 4 KB | `updatePosition()` under `mutexSem`: reads the streamed NAV packets, posts the coordinate to `xQueueCoord`, emits the 1 Hz `gnss_fix` event. |
+| `task_bno_orientation_via_ble` | 1 | 3 | 10 ms | 4 KB | Drains the BNO080 FIFO to the newest report, puts one binary heading frame on `713D0005` per BLE connection event, emits `imu_status` every 60 s. Highest priority in the system. |
+| `task_send_rtk_position_via_ble` | 1 | 2 | 100 ms | 4 KB | Pops `xQueueCoord`, notifies the ASCII position on `713D0004`. |
+| `task_telemetry_drain` | 1 | 1 | 100 ms | 4 KB | Pops the telemetry ring into TX notifications (at most 2 per tick, MTU-3 bytes each), emits the 15 s `heartbeat`. Lowest priority: may starve, never competes. |
+| Arduino `loop()` | 1 | 1 | – | – | Production: idle. Debug: AUnit runner plus a 10 s free-heap / stack-watermark report. |
 
-### Task Timing
+Priorities: head tracking (3) above the two RTK tasks and the position notify (2)
+above telemetry (1). A tie would time-slice and jitter the heading cadence.
 
-- `task_rtk_get_corrrection_data`: 1000ms intervals
-- `task_rtk_get_rover_position`: 100ms intervals
-- `task_bno_orientation_via_ble`: 12ms intervals (fastest - for head tracking)
-- `task_send_rtk_position_via_ble`: 100ms intervals
+## Synchronisation
 
-### Inter-Task Communication
+- `mutexSem` (non-recursive) guards every I2C access to `myGNSS`. The position task
+  takes it with `portMAX_DELAY`; the NTRIP task uses bounded takes and skips the I2C
+  work on timeout so the link never stalls behind a slow bus. `callbackGPGGA` takes
+  it too, so `myGNSS.checkCallbacks()` must never run while holding it.
+- `xQueueCoord`, depth 2, latest position wins (a full queue drops its oldest entry).
+- Telemetry ring (`TelemetryBuffer`, 4 KB, static): producers push under a `portMUX`
+  critical section, drop-oldest on overflow; single consumer is the drain task.
+- Cross-task scalars are `std::atomic` (telemetry module) or `volatile` (`bleConnected`,
+  `lastGgaHeard_ms`, `lastFixGgaHeard_ms`, `ggaSentenceComplete`, BLE pacing state).
 
-- Mutex Semaphore: Protects shared GNSS resources
-- One Queue:
-  - `xQueueCoord`: Position coordinates
-- Global Flag: `beginPositioning` - synchronizes position reading with correction data availability
+## Boot order (`setup()`)
 
-### Task Dependencies
+1. LED, `batteryInit()`; debug builds wait for a key on serial.
+2. `reportResetReason()`: brownout / panic / watchdog become `error` events waiting in the ring.
+3. Debug builds run the AUnit suites here (100 passes), not in `loop()`.
+4. `setupBLE()`: tracker service + telemetry service, advertising starts. BLE first.
+5. `telemetryBleStartTask()`: started before the sensor setups so their failures are visible.
+6. 300 ms radio stagger, then `setupWiFi()`: one 10 s bounded attempt, boot continues regardless.
+7. `setupGNSS()`: retries forever until the ZED-F9P answers (emits `i2c_*` errors once).
+8. Mutex, queue, the four tasks above.
 
-- Task 1 must establish RTCM correction stream before Task 2 begins positioning
-- Tasks 3 & 4 wait for BLE connection before operation
-- Task 4 consumes data produced by Task 2 via queues
-- This architecture ensures real-time head tracking (~12ms) while maintaining accurate RTK positioning and reliable wireless communication.
+The BNO080 is initialised inside the heading task after the first BLE connection, so
+IMU faults become visible only once a phone connects (matches the `imu_status` contract).
 
-## Flowchart
+## Callback contexts
 
-```mermaid
-
-flowchart TD
-    A[System Start] --> B[Hardware Setup]
-    B --> C[Initialize LittleFS]
-    C --> D[Setup WiFi Connection]
-    D --> E[Setup BLE]
-    E --> F[Create FreeRTOS Resources]
-
-    F --> G[Create Mutex Semaphore]
-    G --> H[Create Queue:<br/>xQueueCoord]
-
-    H --> I[Create FreeRTOS Tasks]
-    I --> T1[Task 1:<br/>task_rtk_get_corrrection_data<br/>Core 0, Priority 2]
-    I --> T2[Task 2:<br/>task_rtk_get_rover_position<br/>Core 0, Priority 2]
-    I --> T3[Task 3:<br/>task_bno_orientation_via_ble<br/>Core 1, Priority 2]
-    I --> T4[Task 4:<br/>task_send_rtk_position_via_ble<br/>Core 1, Priority 2]
-
-    I --> L[Main Loop:<br/>Continuous Test Execution]
-
-    %% Task 1 Details
-    T1 --> T1A[Setup GNSS Module]
-    T1A --> T1B[Connect to NTRIP Caster]
-    T1B --> T1C[Receive RTCM Correction Data]
-    T1C --> T1D[Push RTCM to GNSS via I2C<br/>Using Mutex]
-    T1D --> T1E[Send GGA Position to Caster]
-    T1E --> T1F[Delay 1000ms]
-    T1F --> T1C
-
-    %% Task 2 Details
-    T2 --> T2A[Wait for beginPositioning Flag]
-    T2A --> T2B[Get Position Data<br/>Using Mutex]
-    T2B --> T2C[Send Coordinates to xQueueCoord]
-    T2C --> T2E[Delay 100ms]
-    T2E --> T2B
-
-    %% Task 3 Details
-    T3 --> T3A[Wait for BLE Connection]
-    T3A --> T3B[Setup BNO080 IMU]
-    T3B --> T3C[Read Quaternion Data]
-    T3C --> T3D[Convert to Euler Angles<br/>Yaw, Pitch, Linear Acceleration]
-    T3D --> T3E[Send via BLE Characteristic]
-    T3E --> T3F[Delay 12ms]
-    T3F --> T3C
-
-    %% Task 4 Details
-    T4 --> T4A[Wait for BLE Connection]
-    T4A --> T4B[Receive from xQueueCoord]
-    T4B --> T4D[Format Position Data]
-    T4D --> T4E[Send via BLE Characteristic]
-    T4E --> T4F[Delay 100ms]
-    T4F --> T4B
-
-    %% Data Flow
-    T1D -.-> T2A
-    T2C -.-> T4B
-    T2D -.-> T4C
-
-    %% Styling
-    classDef taskClass fill:#1a365d,stroke:#63b3ed,stroke-width:2px,color:#ffffff
-    classDef setupClass fill:#44337a,stroke:#b794f6,stroke-width:2px,color:#ffffff
-    classDef loopClass fill:#276749,stroke:#68d391,stroke-width:2px,color:#ffffff
-    classDef dataClass fill:#744210,stroke:#f6ad55,stroke-width:2px,color:#ffffff
-
-    class T1,T2,T3,T4 taskClass
-    class A,B,C,D,E,F,G,H,I setupClass
-    class L loopClass
-    class T1C,T1D,T2C,T2D,T4B,T4C dataClass
-```
+- `callbackGPGGA` runs inside `myGNSS.checkCallbacks()` on the NTRIP task.
+- BLE server callbacks, the custom GAP/GATTS handlers and the telemetry CTRL `onWrite`
+  run on the Bluedroid BTC task: they only set atomics or volatiles and return.
