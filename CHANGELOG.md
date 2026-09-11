@@ -9,6 +9,8 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+[0.46.2] - 2026-09-11
+
 ### Changed
 
 - One heading frame per BLE connection event (`task_bno_orientation_via_ble`):
