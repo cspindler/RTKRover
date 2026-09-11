@@ -1,6 +1,8 @@
 # ADR-001: BLE-only transport, NTRIP proxied through the phone
 
-- **Status:** Proposed (2026-09-11). Needs the bench A/B in §7 before acceptance.
+- **Status:** Proposed (2026-09-11). Firmware side implemented the same day on branch
+  `ble-only-transport` (rtk-rover 0.48.0, §9). Needs the bench A/B in §7 with the app
+  side before acceptance.
 - **Scope:** rtk-rover firmware, rwa-player (NTRIP client, RTCM writer), rwa-creator
   (heading consumer), PROJECT-PLAN.md (§4–5 contract). RWAHT is unaffected.
 - **Supersedes on acceptance:** the NimBLE port (memory ladder step 1), the hotspot
@@ -177,3 +179,39 @@ buffer and crossfade), but that work only pays off once the link stops dominatin
   per visitor.
 - **Rebuild as Arduino-as-IDF-component for coex tuning.** Unlocks knobs whose effect
   is unknown, at a large toolchain cost, for a fight that need not exist.
+
+## 9. Implementation notes (2026-09-11, branch `ble-only-transport`, rtk-rover 0.48.0)
+
+Firmware side implemented; the status stays Proposed until §7 is run with the app
+side. Deviations from the text above, and what the bench showed:
+
+- **Branched from `main` (0.47.0), not from `test-ntrip-off`.** That branch predates
+  the lean pass (the `ble_link` module, the task split); its WiFi-off patch is three
+  lines the removal makes moot.
+- **§2 RTCM downlink:** `713D0006`, write without response (with response accepted).
+  Chunks are *not* pushed from the write callback: that would put I²C and the GNSS
+  mutex on the Bluedroid task, which also carries the heading notifies. They go into a
+  4 KB drop-oldest chunk FIFO (`src/corrections.cpp`) and the corrections task pushes
+  them under one bounded mutex take per 100 ms; a stall costs the oldest chunks and
+  `rtcm_fifo_overflow` reports it. No framing, no reassembly, as written.
+- **§2 GGA uplink:** the notify option, `713D0007`: the receiver's own sentence without
+  CRLF, fix-quality only, 1 Hz. Not the "app builds GGA from `gnss_fix`" option: that
+  event carries PDOP not HDOP and ellipsoidal not MSL height, and rides the
+  lowest-priority telemetry drain.
+- **§2 telemetry:** heartbeat keys 12 / 13 / 18, type 3 and the five WiFi/NTRIP error
+  codes retired; key 20 `loops_corr`, key 21 `rtcm_bytes` (the "rtcm_pushed bytes/s"
+  above, per 15 s interval) and `rtcm_fifo_overflow` added. PROJECT-PLAN v4.
+- **§5 request:** min = max = 15 ms, not 15–30 ms. On the bench iOS granted the 15–30 ms
+  request at 30 ms (the top of the range, and the interval it had picked unasked) and
+  the 15–15 request, the one pair Apple exempts from its "max ≥ min + 15 ms" rule, at
+  15 ms. The heading task already sends one frame per event; at 15 ms its ~13.5 ms
+  tick is the floor, so nearly every event carries exactly one fresh frame (74/s
+  measured, up from 38/s). The "firmware notifies at 100 Hz" premise in §5 was already
+  stale when written (one frame per event since 0.46.2); the conclusion holds.
+- **Secrets:** the generator emits only the BLE name (from `known-boards.txt`); caster
+  credentials are a phone-side setting. One image per assembly *name* remains until
+  ADR-002 moves the name into NVS.
+- **§7 status:** step 2's firmware criteria that need no app are met (heap 85 KB min,
+  interval logged and granted, 74 frames/s, GGA at 1 Hz; details in CHANGELOG 0.48.0).
+  RTCM ≥ 250 / 300 s, the fix, the app-side jitter (step 2), step 1 (the app's NTRIP
+  client), step 3 (brownouts) and the Grafana dimension change are open.

@@ -9,9 +9,41 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-11
+
 ADR-001: BLE-only transport, NTRIP proxied through the phone
 (`ADR-001-ble-only-transport.md`). Breaking for rwa-player: the app becomes
 the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
+Fleet firmware and app ship together; the app side is not started.
+
+- WiFi and the NTRIP client removed; `task_gnss_corrections` keeps the receiver watchdog
+- RTCM downlink `713D0006` (write without response) into a 4 KB chunk FIFO
+- GGA uplink `713D0007` (notify, fix-quality sentences, 1 Hz)
+- 15 ms connection interval requested and granted (min = max)
+- The image embeds only the BLE name; caster credentials move to the app
+- Telemetry: heartbeat keys 12/13/18 and type 3 retired, keys 20/21 added, five
+  error codes retired, `rtcm_fifo_overflow` added
+
+Production image 1,632,601 → 1,206,021 B (−426 KB, 61 % of the 1.92 MB slot);
+debug 1,669,617 → 1,242,377 B. Static RAM 63,756 → 48,860 B.
+
+### Bench (rwa-hs-1, debug build, the current RWA Player build as the central, 2026-09-11)
+
+The app has no NTRIP client and no decoder for the new keys yet; it connects
+and subscribes to heading and position as before. Against ADR-001 par. 7 step 2:
+
+| criterion | result |
+|---|---|
+| heap minimum ≥ 40 KB | 87.3 KB free steady, 85.1 KB min-ever (was ~11.6 / 6.5 KB with WiFi + NTRIP); 106 KB free at BLE connect |
+| granted interval logged at connect | `BLE conn params granted: interval 12 units (15.00 ms)` 0.4 s after connect; a 15–30 ms request came back at 30 ms |
+| heading delivery | 74 frames/s on the wire, one per ~13.5 ms sensor tick, `misses 0`, no TX congestion (38/s at 30 ms); the app-side jitter measurement is open |
+| RTCM pushes ≥ 250 / 300 s, fix ≤ 200 mm | not testable without the app side; the receiver ran fixless (h_acc 3.2–3.9 m), `rtcm_bytes` 0 |
+| GGA uplink | 49 fix-quality sentences notified in 60 s (1 Hz), none skipped after the MTU exchange |
+| tasks | stack min free: corrections 2536 of 8 KB, position 1952, heading 2088, telemetry 2168 (of 4 KB each); position lines ~8/s; 19/19 AUnit tests |
+| crashes | none in three captures (120 + 45 + 60 s); one `i2cRead returned Error 263` at IMU init in the first capture, not reproduced |
+
+Not run: the two-radio brownout regression check (par. 7 step 3) and the
+Grafana dimension change; both wait for the app side.
 
 ### Added
 
