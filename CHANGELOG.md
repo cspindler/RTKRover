@@ -83,6 +83,13 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   `TASK_RTK_BLE_INTERVAL_MS` and `TASK_RTK_POSITION_VIA_BLE_PRIORITY` removed
   from the config header.
 
+- **`RTKRoverConfig.h` is a config file again** (295 → 190 lines, every macro
+  and value unchanged, byte-identical image). One line of rationale per
+  constant plus a `CHANGELOG x.y.z` pointer replaces the bench dates, the doze
+  doom loop, the brownout and the 2026-08-24 capture write-ups, all of which
+  already live in this file; the HardwareX F9P quote and the Qwiic pull-up note
+  are gone.
+
 ## [Unreleased - lean pass part 1]
 
 ### Changed
