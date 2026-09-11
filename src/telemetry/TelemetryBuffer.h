@@ -3,7 +3,7 @@
  * @brief Fixed-capacity FIFO of telemetry frames, drop-oldest on overflow.
  *
  * The head-tracking protection lives here (PROJECT-PLAN.md par. 5): producers
- * (GNSS / NTRIP / IMU tasks) must never block on telemetry. push() and pop()
+ * (GNSS / corrections / IMU tasks) must never block on telemetry. push() and pop()
  * only ever hold a portMUX critical section for a bounded memcpy of at most
  * TELEMETRY_MAX_FRAME bytes (< 1 us at 240 MHz) — no FreeRTOS locks a task
  * could sleep on, no allocation, no BLE calls. Safe from any task on either

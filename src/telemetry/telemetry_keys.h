@@ -18,7 +18,8 @@
 enum TelemetryEventType : uint8_t {
   TELEM_TYPE_GNSS_FIX     = 1,
   TELEM_TYPE_HEARTBEAT    = 2,
-  TELEM_TYPE_NTRIP_STATUS = 3,
+  // 3 = ntrip_status: retired 0.48.0 (ADR-001), the app emits it as
+  // source `phone`. Never reuse on the BLE leg.
   TELEM_TYPE_IMU_STATUS   = 4,
   TELEM_TYPE_ERROR        = 5,
 };
@@ -48,27 +49,14 @@ enum TelemetryGnssFixKey : uint8_t {
 enum TelemetryHeartbeatKey : uint8_t {
   TELEM_HB_UPTIME_MS       = 10,  // uint
   TELEM_HB_FREE_HEAP       = 11,  // uint
-  TELEM_HB_WIFI_RSSI       = 12,  // int, dBm
-  TELEM_HB_NTRIP_CONNECTED = 13,  // bool
+  // 12 = wifi_rssi, 13 = ntrip_connected: retired 0.48.0 (ADR-001), never reuse
   TELEM_HB_FW_VERSION      = 14,  // text
   TELEM_HB_DROPPED_FRAMES  = 15,  // uint, cumulative since boot
   TELEM_HB_BATT_MV         = 16,  // uint, LiPo pack millivolts (0 = unknown)
   TELEM_HB_HEAP_MIN        = 17,  // uint, lowest free heap since boot
-  TELEM_HB_LOOPS_NTRIP     = 18,  // uint, NTRIP-task loop iterations since last heartbeat
+  // 18 = loops_ntrip: retired 0.48.0 with the NTRIP task, never reuse
   TELEM_HB_LOOPS_POS       = 19,  // uint, position-task loop iterations since last heartbeat
-};
-
-// ntrip_status (type 3)
-enum TelemetryNtripStatusKey : uint8_t {
-  TELEM_NTRIP_STATE      = 10,  // uint (TelemetryNtripState)
-  TELEM_NTRIP_RECONNECTS = 11,  // uint
-  TELEM_NTRIP_BYTES_RX   = 12,  // uint, cumulative
-};
-
-enum TelemetryNtripState : uint8_t {
-  TELEM_NTRIP_DISCONNECTED = 0,
-  TELEM_NTRIP_CONNECTED    = 1,
-  TELEM_NTRIP_RECONNECTING = 2,
+  TELEM_HB_LOOPS_CORR      = 20,  // uint, corrections-task loop iterations since last heartbeat
 };
 
 // imu_status (type 4)

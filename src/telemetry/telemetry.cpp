@@ -89,14 +89,15 @@ bool telemetryEmitGnssFix(const TelemetryGnssFix &fix)
   return b.commit();
 }
 
-// Pipeline liveness counters (heartbeat keys 18/19). Incremented from the
-// NTRIP / position task loop tops, read-and-reset by the heartbeat emitter.
-static std::atomic<uint32_t> ntripLoops{0};
+// Pipeline liveness counters (heartbeat keys 20/19). Incremented from the
+// corrections / position task loop tops, read-and-reset by the heartbeat
+// emitter.
+static std::atomic<uint32_t> correctionsLoops{0};
 static std::atomic<uint32_t> positionLoops{0};
 
-void telemetryNoteNtripLoop()
+void telemetryNoteCorrectionsLoop()
 {
-  ntripLoops.fetch_add(1, std::memory_order_relaxed);
+  correctionsLoops.fetch_add(1, std::memory_order_relaxed);
 }
 
 void telemetryNotePositionLoop()
@@ -104,44 +105,26 @@ void telemetryNotePositionLoop()
   positionLoops.fetch_add(1, std::memory_order_relaxed);
 }
 
-bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, int wifiRssi,
-                            bool ntripConnected, uint32_t battMv)
+bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, uint32_t battMv)
 {
-  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 10);
+  FrameBuilder b(TELEM_TYPE_HEARTBEAT, 8);
   b.w.key(TELEM_HB_UPTIME_MS);
   b.w.uintVal(millis());
   b.w.key(TELEM_HB_FREE_HEAP);
   b.w.uintVal(freeHeap);
   b.w.key(TELEM_HB_HEAP_MIN);
   b.w.uintVal(heapMin);
-  b.w.key(TELEM_HB_WIFI_RSSI);
-  b.w.intVal(wifiRssi);
-  b.w.key(TELEM_HB_NTRIP_CONNECTED);
-  b.w.boolVal(ntripConnected);
   b.w.key(TELEM_HB_FW_VERSION);
   b.w.textVal(FW_VERSION, 32);
   b.w.key(TELEM_HB_DROPPED_FRAMES);
   b.w.uintVal(telemetryDroppedFrames());
-  b.w.key(TELEM_HB_LOOPS_NTRIP);
-  b.w.uintVal(ntripLoops.exchange(0, std::memory_order_relaxed));
   b.w.key(TELEM_HB_LOOPS_POS);
   b.w.uintVal(positionLoops.exchange(0, std::memory_order_relaxed));
+  b.w.key(TELEM_HB_LOOPS_CORR);
+  b.w.uintVal(correctionsLoops.exchange(0, std::memory_order_relaxed));
   // batt_mv stays the last pair: frame_heartbeat_carries_batt_mv asserts it.
   b.w.key(TELEM_HB_BATT_MV);
   b.w.uintVal(battMv);
-  return b.commit();
-}
-
-bool telemetryEmitNtripStatus(TelemetryNtripState state, uint32_t reconnects,
-                              uint32_t bytesRx)
-{
-  FrameBuilder b(TELEM_TYPE_NTRIP_STATUS, 3);
-  b.w.key(TELEM_NTRIP_STATE);
-  b.w.uintVal(state);
-  b.w.key(TELEM_NTRIP_RECONNECTS);
-  b.w.uintVal(reconnects);
-  b.w.key(TELEM_NTRIP_BYTES_RX);
-  b.w.uintVal(bytesRx);
   return b.commit();
 }
 
@@ -159,7 +142,6 @@ bool telemetryEmitImuStatus(uint8_t calibStatus, float reportRateHz,
 }
 
 static std::atomic<uint8_t> verbosity{1};
-static std::atomic<bool> ntripConnected{false};
 
 void telemetrySetVerbosity(uint8_t minSeverity)
 {
@@ -171,36 +153,20 @@ uint8_t telemetryVerbosity()
   return verbosity.load(std::memory_order_relaxed);
 }
 
-void telemetrySetNtripConnected(bool connected)
-{
-  ntripConnected.store(connected, std::memory_order_relaxed);
-}
-
-bool telemetryNtripConnected()
-{
-  return ntripConnected.load(std::memory_order_relaxed);
-}
-
 static std::atomic<uint32_t> lastRtcmMs{0};
 static std::atomic<bool> rtcmEverReceived{false};
-static std::atomic<uint32_t> rtcmBytesTotal{0};
 
 void telemetryNoteRtcmPushed(uint32_t numBytes)
 {
+  (void)numBytes;
   lastRtcmMs.store(millis(), std::memory_order_relaxed);
   rtcmEverReceived.store(true, std::memory_order_relaxed);
-  rtcmBytesTotal.fetch_add(numBytes, std::memory_order_relaxed);
 }
 
 uint32_t telemetryCorrAgeMs()
 {
   if (!rtcmEverReceived.load(std::memory_order_relaxed)) return 0xFFFFFFFF;
   return millis() - lastRtcmMs.load(std::memory_order_relaxed);
-}
-
-uint32_t telemetryRtcmBytesTotal()
-{
-  return rtcmBytesTotal.load(std::memory_order_relaxed);
 }
 
 bool telemetryEmitError(uint8_t severity, const char *code, const char *msg)

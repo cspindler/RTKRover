@@ -2,7 +2,7 @@
  * @file telemetry.h
  * @brief Telemetry event emitters + frame queue (PROJECT-PLAN.md par. 4-5).
  *
- * Producers (GNSS / NTRIP / IMU tasks) call telemetryEmit*() — each call CBOR-
+ * Producers (GNSS / corrections / IMU tasks) call telemetryEmit*() — each call CBOR-
  * encodes one event into a stack buffer and pushes the framed result into the
  * drop-oldest ring buffer. Emitters never block and never touch BLE; the
  * telemetry drain task pops frames via telemetryPopFrame() and notifies them
@@ -40,10 +40,7 @@ bool telemetryEmitGnssFix(const TelemetryGnssFix &fix);
 /// heapMin = lowest free heap since boot (esp_get_minimum_free_heap_size()).
 /// The per-interval loop counters (telemetryNote*Loop) are read-and-reset
 /// internally by this call.
-bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, int wifiRssi,
-                            bool ntripConnected, uint32_t battMv);
-bool telemetryEmitNtripStatus(TelemetryNtripState state, uint32_t reconnects,
-                              uint32_t bytesRx);
+bool telemetryEmitHeartbeat(uint32_t freeHeap, uint32_t heapMin, uint32_t battMv);
 bool telemetryEmitImuStatus(uint8_t calibStatus, float reportRateHz,
                             uint32_t resets);
 bool telemetryEmitError(uint8_t severity, const char *code, const char *msg);
@@ -64,22 +61,16 @@ uint32_t telemetrySeqNow();
 void telemetrySetVerbosity(uint8_t minSeverity);
 uint8_t telemetryVerbosity();
 
-/// NTRIP link state, mirrored by the NTRIP task each loop; consumed by the
-/// heartbeat emitter (and by ntrip_status events, work-queue step 5).
-void telemetrySetNtripConnected(bool connected);
-bool telemetryNtripConnected();
-
-/// Pipeline liveness counters (heartbeat keys 18/19): each task bumps its
+/// Pipeline liveness counters (heartbeat keys 20/19): each task bumps its
 /// counter at the top of every loop iteration; the heartbeat emitter reads
-/// and resets them. A healthy 15 s interval shows ~15 (NTRIP) / ~150 (pos);
-/// a collapse to ~1 is the field signature of the 2026-08-21 slowdown.
-void telemetryNoteNtripLoop();
+/// and resets them. A healthy 15 s interval shows ~150 for both; a collapse
+/// to ~1 is the field signature of the 2026-08-21 slowdown.
+void telemetryNoteCorrectionsLoop();
 void telemetryNotePositionLoop();
 
-/// RTCM bookkeeping (par. 4.3): the NTRIP task calls this after each
-/// pushRawData; gnss_fix reads the age, ntrip_status the byte total.
+/// RTCM bookkeeping (par. 4.3): called after each pushRawData into the
+/// receiver; gnss_fix reads the age.
 void telemetryNoteRtcmPushed(uint32_t numBytes);
 uint32_t telemetryCorrAgeMs();       // 0xFFFFFFFF = never received
-uint32_t telemetryRtcmBytesTotal();
 
 #endif /*** TELEMETRY_H ***/

@@ -9,6 +9,45 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+ADR-001: BLE-only transport, NTRIP proxied through the phone
+(`ADR-001-ble-only-transport.md`). Breaking for rwa-player: the app becomes
+the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
+
+### Removed
+
+- **WiFi and the NTRIP client** (ADR-001 par. 2). The assembly no longer
+  associates with the phone's hotspot and no longer talks to the caster.
+  Gone: `handle_wifi.{h,cpp}` (association ladder, TX-power cap, chip-id
+  helpers), `task_rtk_get_corrrection_data` (connect gates, backoff, ICY
+  request, socket drain, GGA push, RTCM timeout), the hotspot path warmer,
+  the `WIFI_*` / `NTRIP_*` / `HOTSPOT_*` constants and the 300 ms radio
+  stagger in `setup()`. What that task did *for the receiver* survives as
+  `task_gnss_corrections` (core 0, priority 2, 100 ms, 6 KB): the NMEA
+  callback dispatch and the receiver watchdog / recovery ladder. The GGA
+  callback keeps only the liveness timestamp; the fix-quality copy for the
+  caster and its mutex take are gone with the caster. `GNSS_MUTEX_TIMEOUT_MS`
+  moved to the watchdog section; `getChipId()` moved into `main.cpp`.
+  Corrections reach the receiver over BLE from here on (next entries).
+  Consequences the ADR states: no standalone RTK (the receiver converges only
+  while RWA Player is connected), one failure domain (a BLE drop loses
+  corrections too, as it already lost heading), and rwa-creator gets no
+  corrections unless it proxies NTRIP itself.
+
+### Changed
+
+- **Telemetry contract, breaking** (PROJECT-PLAN.md par. 4.3 and 5.3, v4).
+  Retired on the BLE leg, never to be reused: heartbeat keys 12 `wifi_rssi`,
+  13 `ntrip_connected`, 18 `loops_ntrip`; event type 3 `ntrip_status`; error
+  codes `wifi_disconnected`, `ntrip_connect_failed`, `ntrip_rtcm_timeout`,
+  `ntrip_bad_response`, `ntrip_request_overflow`. New: heartbeat key 20
+  `loops_corr`, the corrections-task iteration count per interval (~150 per
+  15 s), which takes over the `gnss_pipe_stall` liveness role `loops_ntrip`
+  had. `ntrip_status` and `heartbeat.ntrip_connected` become app-created
+  (`source` = `phone`): the app owns the caster session now. The rwa-player
+  decoder and the Grafana panels keyed on the retired fields change with the
+  fleet firmware; no dual-transport period. The AUnit heartbeat tests follow
+  the new key set.
+
 ## [0.47.0] - 2026-09-11
 
 Lean pass, conclusion / continuation of part 1

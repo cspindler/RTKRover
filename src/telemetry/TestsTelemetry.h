@@ -285,7 +285,7 @@ test(frame_seq_increments)
 test(frame_heartbeat_carries_fw_version)
 {
   drainTelemetry();
-  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -307,7 +307,7 @@ test(frame_heartbeat_carries_fw_version)
 test(frame_heartbeat_carries_batt_mv)
 {
   drainTelemetry();
-  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -322,15 +322,15 @@ test(frame_heartbeat_carries_batt_mv)
 test(frame_heartbeat_carries_heap_min_and_loop_counters)
 {
   // First heartbeat resets the loop counters (read-and-reset), then discard it.
-  telemetryEmitHeartbeat(123456, 9876, -60, true, 3900);
+  telemetryEmitHeartbeat(123456, 9876, 3900);
   drainTelemetry();
 
-  telemetryNoteNtripLoop();
-  telemetryNoteNtripLoop();
-  telemetryNoteNtripLoop();
+  telemetryNoteCorrectionsLoop();
+  telemetryNoteCorrectionsLoop();
+  telemetryNoteCorrectionsLoop();
   telemetryNotePositionLoop();
   telemetryNotePositionLoop();
-  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
 
   uint8_t frame[TELEMETRY_MAX_FRAME];
   size_t n = telemetryPopFrame(frame, sizeof(frame));
@@ -340,17 +340,17 @@ test(frame_heartbeat_carries_heap_min_and_loop_counters)
   const uint8_t wantHeapMin[] = {TELEM_HB_HEAP_MIN, 0x19, 0x26, 0x94};
   assertTrue(containsBytes(frame, n, wantHeapMin, sizeof(wantHeapMin)));
 
-  // Adjacent pairs: loops_ntrip (key 18) = 3, loops_pos (key 19) = 2
-  const uint8_t wantLoops[] = {TELEM_HB_LOOPS_NTRIP, 0x03,
-                               TELEM_HB_LOOPS_POS, 0x02};
+  // Adjacent pairs: loops_pos (key 19) = 2, loops_corr (key 20) = 3
+  const uint8_t wantLoops[] = {TELEM_HB_LOOPS_POS, 0x02,
+                               TELEM_HB_LOOPS_CORR, 0x03};
   assertTrue(containsBytes(frame, n, wantLoops, sizeof(wantLoops)));
 
   // Read-and-reset: the next heartbeat reports zeros.
-  assertTrue(telemetryEmitHeartbeat(123456, 9876, -60, true, 3900));
+  assertTrue(telemetryEmitHeartbeat(123456, 9876, 3900));
   n = telemetryPopFrame(frame, sizeof(frame));
   assertMore(n, (size_t)4);
-  const uint8_t wantZeros[] = {TELEM_HB_LOOPS_NTRIP, 0x00,
-                               TELEM_HB_LOOPS_POS, 0x00};
+  const uint8_t wantZeros[] = {TELEM_HB_LOOPS_POS, 0x00,
+                               TELEM_HB_LOOPS_CORR, 0x00};
   assertTrue(containsBytes(frame, n, wantZeros, sizeof(wantZeros)));
 }
 

@@ -24,8 +24,6 @@
 #include <CasterSecrets.h>
 #include <battery.h>
 #include <led.h>
-#include <handle_wifi.h>
-#include <WiFiUdp.h> // hotspot path warmer (warmHotspotPath)
 #include <telemetry/telemetry.h>
 #include <telemetry/telemetry_ble.h>
 #include <ble_link.h>
@@ -38,17 +36,28 @@
                                 Bluetooth LE
 =================================================================================
 */
+// Last 24 bits of the eFuse MAC: the chip-id half of the fallback BLE name.
+static uint32_t getChipId()
+{
+  uint32_t chipId = 0;
+  for (int i = 0; i < 17; i = i + 8)
+  {
+    chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
+  }
+  return chipId;
+}
+
 // Fleet-configured BLE name (fleet-secrets.ini via CasterSecrets.h), empty on
-// placeholder builds -> fall back to the chip-id name.
+// placeholder builds -> fall back to "<DEVICE_TYPE>-<chip-id>".
 static String getBleName()
 {
   if (kBleName[0] != '\0')
     return String(kBleName);
-  return getDeviceName(DEVICE_TYPE);
+  return String(DEVICE_TYPE) + "-" + String(getChipId(), HEX);
 }
 
 // Task handles, for the debug-build stack watermark report in loop().
-static TaskHandle_t hTaskCorrData = NULL;
+static TaskHandle_t hTaskCorrections = NULL;
 static TaskHandle_t hTaskPosition = NULL;
 static TaskHandle_t hTaskBnoBle = NULL;
 
@@ -73,9 +82,8 @@ link at the negotiated connection interval, and a notify() call only enqueues
 a buffer for the next one. Sampling faster than that interval therefore cannot
 make the data arrive sooner, it only queues frames that ride out in the same
 burst, where the app renders the newest and discards the rest. Each of those
-discarded frames still costs airtime (a longer connection event is a longer
-WiFi blackout through radio coex) and still holds a Bluedroid TX buffer, which
-is heap.
+discarded frames still costs airtime and still holds a Bluedroid TX buffer,
+which is heap.
 
 So: keep draining the IMU every tick, keep the cached frame always fresh, and
 put exactly one frame on the wire per connection event. The interval is the
@@ -117,8 +125,6 @@ void setupBNO080(void);
                                 GNSS
 =================================================================================
 */
-#include "base64.h" // ESP32 core base64, for the NTRIP basic-auth header
-
 SFE_UBLOX_GNSS myGNSS;
 
 // High-precision coordinate: UBX 1e-7 deg + 1e-9 high-res part, the units
@@ -156,12 +162,12 @@ static bool updatePosition(coord_t *out);
 static xSemaphoreHandle mutexSem;
 
 /**
- * @brief Task to get the correction data from the caster server
- *        using WiFi
+ * @brief Task for the receiver's correction side: dispatches the NMEA
+ *        callbacks and runs the receiver watchdog (recovery ladder).
  *
  * @param pvParameters Void pointer, no parameter used here
  */
-void task_rtk_get_corrrection_data(void *pvParameters);
+void task_gnss_corrections(void *pvParameters);
 
 /**
  * @brief Task for the position pipeline: updatePosition() under the mutex,
@@ -229,10 +235,10 @@ void setup()
   reportResetReason();
 
   #ifdef TESTING
-  // Run the AUnit tests here rather than relying on loop(): with no WiFi
-  // hotspot in range setup() blocks forever below, so loop() (the usual
-  // AUnit driver) may never run. All tests are synchronous; a bounded
-  // number of passes resolves them all and prints the summary to serial.
+  // Run the AUnit tests here rather than relying on loop(): setupGNSS()
+  // below retries forever without a receiver, so loop() (the usual AUnit
+  // driver) may never run. All tests are synchronous; a bounded number of
+  // passes resolves them all and prints the summary to serial.
   DBG.println(F("Running unit tests..."));
   for (int i = 0; i < 100; i++)
   {
@@ -241,7 +247,7 @@ void setup()
   }
   #endif
 
-  // blink sequence before starting WiFi and BLE
+  // blink sequence before starting BLE
   blinkOneTime(125, true);
   blinkOneTime(125, true);
   blinkOneTime(2000, true);
@@ -249,7 +255,7 @@ void setup()
   DBG.print(F("BLE Device name: "));
   DBG.println(getBleName());
 
-  // BLE comes up first, and we don't wait for WiFi in setup().
+  // BLE first: it is the only radio, and the phone connects within a second.
   setupBLE();
 
   // Telemetry drain: lowest priority in the system (PROJECT-PLAN.md par. 5).
@@ -258,20 +264,8 @@ void setup()
   // drain not yet running the assembly would sit BLE-connected but mute.
   // The i2c_* error events waiting in the ring, never delivered (observed
   // 2026-08-24, rwa-hs-4: F9P not ACKing, app received no telemetry at all).
-  // The task needs only the ring, BLE and battery/WiFi reads.
+  // The task needs only the ring, BLE and the battery read.
   telemetryBleStartTask();
-
-  delay(RADIO_START_STAGGER_MS);
-
-  // One bounded attempt (setupStationMode() gives up after 10 s), then carry on
-  // whatever the result. WiFi has one consumer: task_rtk_get_corrrection_data, that task has a
-  // reconnect ladder for a hotspot that is missing or lost.
-  setupWiFi();
-
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
 
   setupGNSS();
 
@@ -290,13 +284,14 @@ void setup()
   corruption. 2026-07-29: total 21 KB, down from 35 KB - the freed 14 KB of
   heap is what ended the connect-time OOM panics (vQueueDelete assert /
   lock_init_generic abort). 2026-09-11: 17 KB, the position sender task and
-  its queue merged into the position task.
+  its queue merged into the position task. 0.48.0: 14 KB, the NTRIP task and
+  its socket buffers gone (ADR-001).
   */
-  int stack_size_task_rtk_get_corrrection_data = 1024 * 9;       // min free 2792 (2026-09-11)
+  int stack_size_task_gnss_corrections = 1024 * 6;               // NTRIP task: min free 2792 of 9 KB with 3 KB of socket buffers; re-measured 0.48.0
   int stack_size_task_rtk_get_rover_position = 1024 * 4;         // min free 2344 before the merge; notify() added
   int stack_size_task_bno_orientation_via_ble = 1024 * 4;        // min free 2080
 
-  xTaskCreatePinnedToCore( &task_rtk_get_corrrection_data, "task_rtk_get_corrrection_data", stack_size_task_rtk_get_corrrection_data, NULL, TASK_RTK_GET_CORR_DATA_PRIORITY, &hTaskCorrData, RUNNING_CORE_0);
+  xTaskCreatePinnedToCore( &task_gnss_corrections, "task_gnss_corrections", stack_size_task_gnss_corrections, NULL, TASK_GNSS_CORRECTIONS_PRIORITY, &hTaskCorrections, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_rtk_get_rover_position, "task_rtk_get_rover_position", stack_size_task_rtk_get_rover_position, NULL, TASK_RTK_GET_POSITION_PRIORITY, &hTaskPosition, RUNNING_CORE_0);
   xTaskCreatePinnedToCore( &task_bno_orientation_via_ble, "task_bno_orientation_via_ble", stack_size_task_bno_orientation_via_ble, NULL, TASK_BNO080_VIA_BLE_PRIORITY, &hTaskBnoBle, RUNNING_CORE_1);
 
@@ -329,7 +324,7 @@ void loop()
     lastMemReport = millis();
     logFreeHeap("loop");
     DBG.printf("stack min free: corr %u, pos %u, bno %u, telem %u, loop %u\n",
-               hTaskCorrData ? uxTaskGetStackHighWaterMark(hTaskCorrData) : 0,
+               hTaskCorrections ? uxTaskGetStackHighWaterMark(hTaskCorrections) : 0,
                hTaskPosition ? uxTaskGetStackHighWaterMark(hTaskPosition) : 0,
                hTaskBnoBle ? uxTaskGetStackHighWaterMark(hTaskBnoBle) : 0,
                telemetryBleTaskHandle() ? uxTaskGetStackHighWaterMark(telemetryBleTaskHandle()) : 0,
@@ -344,76 +339,26 @@ void loop()
 =======================================_==========================================
 */
 
-char ggaSentence[NMEA_GGA_MAX_LENGTH] = {0};
-volatile bool ggaSentenceComplete = false;
-
 // Receiver-liveness timestamp: millis() of the last GGA sentence the module
 // produced (callbackGPGGA fires with or without a fix, ~1/s at the configured
-// MSGOUT rate). Written from callbackGPGGA and the NTRIP task's re-arm sites.
-// GNSS_SILENT_AFTER_MS without one means the receiver is mute
+// MSGOUT rate). Written from callbackGPGGA and armed at corrections-task
+// start. GNSS_SILENT_AFTER_MS without one means the receiver is mute
 // (bench 4.1, 2026-08-24) and drives the recovery ladder.
 static volatile uint32_t lastGgaHeard_ms = 0;
 
-// millis() of the last GGA carrying a fix (quality field >= 1), 0 = never.
-// Drives the NTRIP connect gate: the VRS computes its virtual station from
-// our GGA, and a fixless one is unusable to it. Same single-writer situation
-// as lastGgaHeard_ms (callbackGPGGA only runs from the NTRIP task's
-// checkCallbacks dispatch).
-static volatile uint32_t lastFixGgaHeard_ms = 0;
-
-// GGA fix-quality field (7th comma-separated field; 0 = no fix). Returns 0 on
-// any parse shortfall: an unparseable sentence shouldn't count as a fix.
-static uint8_t ggaFixQuality(const uint8_t *nmea, uint16_t length)
-{
-  uint8_t commas = 0;
-  for (uint16_t i = 0; i < length; i++)
-  {
-    if (nmea[i] != ',') continue;
-    if (++commas < 6) continue;
-    if (i + 1 < length && nmea[i + 1] >= '0' && nmea[i + 1] <= '9')
-      return nmea[i + 1] - '0';
-    return 0;
-  }
-  return 0;
-}
-
-// Callback: callbackGPGGA will be called when new GPGGA NMEA data arrives
-// See u-blox_structs.h for the full definition of NMEA_GGA_data_t
-//         _____  You can use any name you like for the callback. Use the same name when you call setNMEAGPGGAcallback
-//        /               _____  This _must_ be NMEA_GGA_data_t
-//        |              /           _____ You can use any name you like for the struct
-//        |              |          /
-//        |              |          |
+// Called from myGNSS.checkCallbacks() on the corrections task for every
+// complete GGA sentence (NMEA_GGA_data_t: see u-blox_structs.h).
 void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 {
-  // Liveness first, unconditionally: even when the copy below is skipped,
-  // a GGA arriving proves the receiver is producing output.
+  (void)nmeaData;
+  // A GGA arriving proves the receiver is producing output.
   lastGgaHeard_ms = millis();
-
-  // Store only sentences with a fix: what reaches ggaSentence is what gets
-  // pushed to the caster, and a fixless GGA shouldn't go there.
-  // No fix also leaves ggaSentenceComplete un-armed, so a mid-session fix loss
-  // stops the pushes instead of repeating the last position.
-  if (ggaFixQuality(nmeaData->nmea, nmeaData->length) == 0)
-    return;
-  lastFixGgaHeard_ms = millis();
-
-  // Bounded take: this runs inside the NTRIP task's checkCallbacks(), and a
-  // portMAX_DELAY here was the unattributed ~14 s of the 2026-08-24 stall
-  // capture (position task holding mutexSem through a slow-I2C stretch).
-  // Skipping one GGA is free, the module emits a fresh one every epoch.
-  if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GGA_MUTEX_TIMEOUT_MS))) {
-    memset(ggaSentence, 0, NMEA_GGA_MAX_LENGTH);
-    strncpy(ggaSentence, (const char *)nmeaData->nmea, nmeaData->length);
-    ggaSentenceComplete = true;
-    xSemaphoreGive(mutexSem);
-  }
 }
 
 /**
  * @brief One begin() attempt + the full rover configuration. Shared by boot
  * (setupGNSS, which retries around it) and the runtime recovery ladder in
- * the NTRIP task (which calls it holding mutexSem after a reset).
+ * the corrections task (which calls it holding mutexSem after a reset).
  * Never loops/blocks on an unresponsive module.
  *
  * @return NULL when the module answered and every config write was
@@ -524,13 +469,13 @@ bool setupGNSS()
 /**
  * @brief One bounded-mutex checkUblox() pass, then the NMEA callbacks.
  *
- * Every myGNSS I2C access runs under mutexSem: the NTRIP task shares the
- * object and the bus with the position task, and unsynchronized access
+ * Every myGNSS I2C access runs under mutexSem: the corrections task shares
+ * the object and the bus with the position task, and unsynchronized access
  * desyncs the UBX parser (8.8 s getter stalls measured 2026-07-29). On
  * timeout the pass is skipped: the position task's own passes keep the
  * parser fed, and the caller must not stall behind a slow bus.
- * checkCallbacks() stays OUTSIDE the mutex: no I2C, and callbackGPGGA takes
- * the (non-recursive) mutex itself, so holding it here would self-deadlock.
+ * checkCallbacks() stays OUTSIDE the mutex: no I2C in the callbacks, and
+ * nothing they do may wait on the position task.
  */
 static void gnssCheckUbloxLocked(uint32_t timeout_ms)
 {
@@ -694,73 +639,6 @@ static bool updatePosition(coord_t *out)
   return trusted;
 }
 
-// Hotspot path warmer (see HOTSPOT_WARM_INTERVAL_MS in RTKRoverConfig.h for
-// the doze doom loop this breaks). Sends one minimal DNS A query for the
-// caster host to the hotspot's DNS server every interval. Deliberately NOT
-// WiFi.hostByName(): that goes through lwIP's DNS cache, which answers a
-// repeated name locally — no packet on the wire — until the record's TTL
-// expires, so it cannot hold a cadence. A hand-built query always transmits,
-// and the reply coming back keeps the NAT entry fresh too. Fire-and-forget:
-// the exchange is the point, the answer is never parsed (the phone's DNS
-// proxy resolving it upstream is the pre-warming side effect). Rate-limits
-// itself, so call sites may invoke it every iteration. No-op unless WiFi is
-// associated; callers guarantee the caster is disconnected.
-static void warmHotspotPath(const char *host)
-{
-  static uint32_t lastWarm_ms = 0;
-  static WiFiUDP warmUdp;
-  static bool warmUdpReady = false;
-  static uint16_t warmQueryId = 0;
-
-  if (!WiFi.isConnected()) return;
-  if (millis() - lastWarm_ms < HOTSPOT_WARM_INTERVAL_MS) return;
-  lastWarm_ms = millis();
-
-  if (!warmUdpReady) warmUdpReady = warmUdp.begin(0) != 0;  // ephemeral port
-  if (!warmUdpReady) return;
-
-  // Discard the previous warm's reply (never parsed, see above).
-  while (warmUdp.parsePacket() > 0) warmUdp.flush();
-
-  IPAddress dnsServer = WiFi.dnsIP();
-  if (dnsServer == IPAddress()) return;
-
-  // DNS header: id, RD flag, one question.
-  uint8_t query[12 + 260];
-  size_t len = 0;
-  warmQueryId++;
-  query[len++] = warmQueryId >> 8;
-  query[len++] = warmQueryId & 0xFF;
-  query[len++] = 0x01;  // flags: recursion desired
-  query[len++] = 0x00;
-  query[len++] = 0x00;  // QDCOUNT = 1
-  query[len++] = 0x01;
-  memset(query + len, 0, 6);  // AN/NS/ARCOUNT = 0
-  len += 6;
-  // QNAME: dotted host as length-prefixed labels
-  for (const char *p = host; *p != '\0'; )
-  {
-    const char *dot = strchr(p, '.');
-    size_t label = dot ? (size_t)(dot - p) : strlen(p);
-    if (label == 0 || label > 63 || len + label + 1 + 5 > sizeof(query)) return;
-    query[len++] = (uint8_t)label;
-    memcpy(query + len, p, label);
-    len += label;
-    p += label + (dot ? 1 : 0);
-  }
-  query[len++] = 0x00;  // root label
-  query[len++] = 0x00;  // QTYPE = A
-  query[len++] = 0x01;
-  query[len++] = 0x00;  // QCLASS = IN
-  query[len++] = 0x01;
-
-  warmUdp.beginPacket(dnsServer, 53);
-  warmUdp.write(query, len);
-  bool sent = warmUdp.endPacket() != 0;
-  DBG.printf("hotspot path warmer: DNS query for %s -> %s\n",
-             host, sent ? "sent" : "send failed");
-}
-
 /*
 =================================================================================
                                 FreeRTOS
@@ -808,399 +686,31 @@ void task_rtk_get_rover_position(void *pvParameters)
   vTaskDelete(NULL);
 }
 
-/**
- * @brief Build the caster request: GET line, user agent, Basic auth (or a
- * plain Accept/Connection block when there is no user). Returns false when
- * the request does not fit: a truncated one would carry broken headers and
- * fail at the caster anyway, and the old strncat bounded by the full
- * destination size could smash this task's stack.
- */
-static bool ntripBuildRequest(char *out, size_t cap)
-{
-  int len = snprintf(out, cap, "GET /%s HTTP/1.0\r\nUser-Agent: NTRIP SparkFun u-blox Client v1.0\r\n",
-                     kMountPoint);
-  if (len < 0 || (size_t)len >= cap) return false;
-
-  int appended;
-  if (kCasterUser[0] == '\0')
-  {
-    appended = snprintf(out + len, cap - len, "Accept: */*\r\nConnection: close\r\n\r\n");
-  }
-  else
-  {
-    char userCredentials[sizeof(kCasterUser) + sizeof(kCasterPass)];  // "user:pass" + NUL
-    snprintf(userCredentials, sizeof(userCredentials), "%s:%s", kCasterUser, kCasterPass);
-    base64 b;
-    String encoded = b.encode(userCredentials);
-    appended = snprintf(out + len, cap - len, "Authorization: Basic %s\r\n\r\n", encoded.c_str());
-  }
-  return appended >= 0 && (size_t)appended < cap - len;
-}
-
-void task_rtk_get_corrrection_data(void *pvParameters)
+void task_gnss_corrections(void *pvParameters)
 {
   (void)pvParameters;
-
-  // Caster credentials: compile-time constants from CasterSecrets.h, empty
-  // on a placeholder build (no fleet-secrets entry): nothing to connect to,
-  // park the task; heading, position and telemetry keep running.
-  const uint16_t casterPort = (uint16_t)strtoul(kCasterPort, NULL, 10);
-  if (kCasterHost[0] == '\0' || casterPort == 0 || kCasterUser[0] == '\0' || kMountPoint[0] == '\0')
-  {
-    DBG.println(F("RTK credentials incomplete! Suspending RTK task."));
-    vTaskSuspend(NULL);
-  }
-
-  WiFiClient ntripClient;
-
-  // No-RTCM hangup window. Starts at the post-connect grace (the VRS needs
-  // our GGA before it streams; 2026-08-24: a fixed 10 s window expired inside
-  // the post-connect mutex wait and killed every session in the iteration
-  // that opened it), tightens to NTRIP_RTCM_TIMEOUT_MS once data flows.
-  uint32_t lastReceivedRTCM_ms = 0;
-  uint32_t rtcmTimeout_ms = NTRIP_CONNECT_GRACE_MS;
-  bool gotDataThisSession = false;
-
-  // Reconnect backoff (caster etiquette, refnet throttles reconnect floods):
-  // attemptDelay_ms is waited before the next connect attempt; armBackoff()
-  // arms it from reconnectDelay_ms at every failed or dataless attempt, which
-  // then doubles up to the cap. Received RTCM resets both.
-  uint32_t reconnectDelay_ms = NTRIP_BACKOFF_START_MS;
-  uint32_t attemptDelay_ms = 0;
-  auto armBackoff = [&]()
-  {
-    attemptDelay_ms = reconnectDelay_ms;
-    reconnectDelay_ms = min(reconnectDelay_ms * 2, (uint32_t)NTRIP_BACKOFF_MAX_MS);
-  };
-
-  // GGA is required for Rev2 NTRIP casters (the VRS computes its virtual
-  // station from it); push one every 10 s.
-  const uint32_t timeBetweenGGAUpdate_ms = 10000;
-  uint32_t lastTransmittedGGA_ms = 0;
-
-  // ntrip_status bookkeeping (PROJECT-PLAN.md par. 4.3): events on state
-  // transitions only, never per retry iteration - outages must not flood
-  // the ring. successfulConnects - 1 = "reconnects" in the event.
-  uint32_t successfulConnects = 0;
-  bool wasConnected = false;
-  bool reconnectingEmitted = false;  // one reconnecting event per outage
-  bool outageErrorEmitted = false;   // one error event per outage, not per retry
-  auto emitOutageError = [&](uint8_t severity, const char *code, const char *msg)
-  {
-    if (outageErrorEmitted) return;
-    outageErrorEmitted = true;
-    telemetryEmitError(severity, code, msg);
-  };
 
   lastGgaHeard_ms = millis();  // arm the receiver-liveness clock at task start
 
   while (true)
   {
-    telemetryNoteNtripLoop();  // heartbeat liveness counter (key 18)
+    telemetryNoteCorrectionsLoop();  // heartbeat liveness counter (key 20)
 
     // gnss_pipe_stall: an iteration over GNSS_PIPE_STALL_MS is reported at
-    // the bottom of the loop. Deliberate waits (recovery, WiFi outage,
-    // backoff) restart the clock so they don't count as a stall.
+    // the bottom of the loop. A recovery attempt restarts the clock so its
+    // deliberate reset wait doesn't count as a stall.
     uint32_t iterStart_ms = millis();
 
-    // Mirror the link state for the telemetry heartbeat
-    bool nowConnected = ntripClient.connected();
-    telemetrySetNtripConnected(nowConnected);
-    if (wasConnected && !nowConnected)
-    {
-      telemetryEmitNtripStatus(TELEM_NTRIP_DISCONNECTED,
-                               successfulConnects > 0 ? successfulConnects - 1 : 0,
-                               telemetryRtcmBytesTotal());
-    }
-    wasConnected = nowConnected;
-
-    // Dispatch pending NMEA callbacks at the loop top so callbackGPGGA runs
-    // in EVERY iteration, including receiver-silent ones that skip the
-    // caster below: it feeds the GGA push, and it is the liveness signal
-    // (lastGgaHeard_ms) the gate and recovery ladder depend on. Must stay
-    // OUTSIDE mutexSem: no I2C here, and callbackGPGGA takes the
-    // (non-recursive) mutex itself.
+    // Dispatch pending NMEA callbacks so callbackGPGGA runs every iteration:
+    // it is the liveness signal (lastGgaHeard_ms) the recovery ladder depends
+    // on. Must stay OUTSIDE mutexSem (gnssCheckUbloxLocked says why).
     myGNSS.checkCallbacks();
 
     if (gnssRecoveryTick()) iterStart_ms = millis();
 
-    if (!ntripClient.connected())
-    {
-      if (wifiEnsureAssociated())
-      {
-        // A WiFi outage is reported by wifi_disconnected, not
-        // gnss_pipe_stall: restart the iteration clock so outage time
-        // doesn't count as a stall. And while blocked, checkCallbacks never
-        // ran, so the liveness clock is stale regardless of the receiver's
-        // health. Re-arm it: the receiver gets GNSS_SILENT_AFTER_MS to
-        // prove itself before gate/ladder act.
-        iterStart_ms = millis();
-        lastGgaHeard_ms = millis();
-      }
-
-      // WiFi associated, caster disconnected: keep the hotspot's upstream
-      // path awake - nothing else is generating traffic in this state, and
-      // the gates below can hold us here for minutes. (Self rate-limited.)
-      warmHotspotPath(kCasterHost);
-
-      // Receiver-liveness gate: a mute F9P produces no GGA, and the VRS
-      // streams nothing without one. Connecting would only cycle dataless
-      // sessions against the caster (~93 s cycle observed, bench 4.1). The
-      // recovery ladder owns this state; skip caster attempts until the
-      // receiver talks again.
-      if (millis() - lastGgaHeard_ms > GNSS_SILENT_AFTER_MS)
-      {
-        DBG.println(F("NTRIP connect skipped: receiver silent"));
-        vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
-        continue;
-      }
-
-      // Fix gate: don't open a session before the receiver has a usable
-      // position for the VRS. The receiver's health is visible regardless -
-      // the position task emits gnss_fix (fix_type 0) throughout acquisition.
-      // 0 = no fix-quality GGA seen since boot.
-      if (lastFixGgaHeard_ms == 0 ||
-          millis() - lastFixGgaHeard_ms > NTRIP_GGA_FIX_MAX_AGE_MS)
-      {
-        DBG.println(F("NTRIP connect skipped: no GNSS fix"));
-        vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
-        continue;
-      }
-
-      if (successfulConnects > 0 && !reconnectingEmitted)
-      {
-        // Once per outage, and only after a previous connection: the
-        // initial connect is not a "reconnecting" transition.
-        reconnectingEmitted = true;
-        telemetryEmitNtripStatus(TELEM_NTRIP_RECONNECTING,
-                                 successfulConnects - 1,
-                                 telemetryRtcmBytesTotal());
-      }
-
-      // Backoff: armed by the previous failed or dataless attempt. Waiting
-      // here (single site) keeps every retry path (TCP fail, caster timeout,
-      // bad response, dataless hangup) on the same schedule.
-      if (attemptDelay_ms > 0)
-      {
-        DBG.printf("NTRIP backoff: waiting %u ms before reconnect\n", attemptDelay_ms);
-        // Sliced sleep: the warmer must keep its cadence through this wait
-        // (up to NTRIP_BACKOFF_MAX_MS in one go) - these gaps are exactly
-        // where the hotspot dozes off.
-        uint32_t waited_ms = 0;
-        while (waited_ms < attemptDelay_ms)
-        {
-          uint32_t slice_ms = min(attemptDelay_ms - waited_ms, (uint32_t)1000);
-          vTaskDelay(slice_ms/portTICK_PERIOD_MS);
-          waited_ms += slice_ms;
-          warmHotspotPath(kCasterHost);
-        }
-        attemptDelay_ms = 0;
-        iterStart_ms = millis();  // deliberate pacing, not a pipeline stall
-      }
-
-      // --- Open a session: TCP connect, request, response -----------------
-      DBG.printf("Opening socket to %s:%u\n", kCasterHost, casterPort);
-      if (!ntripClient.connect(kCasterHost, casterPort))
-      {
-        DBG.println(F("Connection to caster failed"));
-        emitOutageError(1, "ntrip_connect_failed", "TCP connect to caster failed");
-        armBackoff();
-        continue;
-      }
-
-      char serverRequest[512];
-      if (!ntripBuildRequest(serverRequest, sizeof(serverRequest)))
-      {
-        DBG.println(F("NTRIP server request exceeds buffer, not sent. Check mount point / credential lengths."));
-        telemetryEmitError(2, "ntrip_request_overflow",
-                           "caster request exceeds buffer; check mount point / credential lengths");
-        ntripClient.stop();
-        telemetrySetNtripConnected(false);
-        armBackoff();
-        continue;  // config is wrong, but never overflow
-      }
-      // Request line only: the header block carries the Basic-auth
-      // credentials, which must not land in serial captures.
-      DBG.printf("Requesting mount point %s: ", kMountPoint);
-      DBG.write((const uint8_t *)serverRequest, strcspn(serverRequest, "\r\n"));
-      DBG.println();
-      ntripClient.write(serverRequest, strlen(serverRequest));
-
-      // Wait for the response, bounded: too many requests with wrong
-      // settings lead to a ban, so stop instead of re-sending.
-      uint32_t waitStart_ms = millis();
-      bool casterTimedOut = false;
-      while (ntripClient.available() == 0)
-      {
-        if (millis() - waitStart_ms > CONNECTION_TIMEOUT_MS)
-        {
-          ntripClient.stop();
-          DBG.println(F("Caster timed out!"));
-          casterTimedOut = true;
-          break;
-        }
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-      }
-      if (casterTimedOut)
-      {
-        telemetrySetNtripConnected(false);  // stop() happened in the wait loop
-        emitOutageError(1, "ntrip_connect_failed", "caster response timeout");
-        armBackoff();
-        continue;
-      }
-
-      char response[512];
-      size_t responseLen = 0;
-      while (ntripClient.available() && responseLen < sizeof(response) - 1)
-      {
-        response[responseLen++] = ntripClient.read();
-      }
-      response[responseLen] = '\0';
-      DBG.print(F("Caster responded with: "));
-      DBG.println(response);
-
-      // 'ICY 200 OK' / 'HTTP/1.1 200 OK' opens the stream. A source table
-      // means the mount point is unknown to the caster; 401 means bad
-      // credentials or a ban.
-      if (strstr(response, "200") == NULL)
-      {
-        DBG.printf("Failed to connect to %s\n", kCasterHost);
-        // Caster spoke but refused (401, wrong mount point, ban):
-        // config-class problem, so severity 2 - a Grafana alert, not
-        // noise. The caster response goes in msg (no secrets in it).
-        emitOutageError(2, "ntrip_bad_response", response);
-        armBackoff();
-        continue;
-      }
-
-      DBG.printf("Connected to %s\n", kCasterHost);
-      lastReceivedRTCM_ms = millis();
-      // Fresh session: full grace window until the first RTCM (the VRS
-      // streams only after our GGA), and nothing received yet.
-      rtcmTimeout_ms = NTRIP_CONNECT_GRACE_MS;
-      gotDataThisSession = false;
-      telemetrySetNtripConnected(true);
-
-      successfulConnects++;
-      outageErrorEmitted = false;
-      reconnectingEmitted = false;
-      telemetryEmitNtripStatus(TELEM_NTRIP_CONNECTED,
-                               successfulConnects - 1,
-                               telemetryRtcmBytesTotal());
-
-      // Expire the GGA gate so the push block later in this iteration
-      // sends a GGA as soon as one is complete: the VRS computes the
-      // virtual station from it and streams nothing until it arrives.
-      lastTransmittedGGA_ms = millis() - timeBetweenGGAUpdate_ms - 1;
-
-      // One parser pass so a GGA is ready for that push; bounded, because
-      // this task must reach its read/GGA sections while the grace window
-      // is still open.
-      gnssCheckUbloxLocked(GNSS_MUTEX_TIMEOUT_MS);
-    }
-
-    // --- Stream: drain the socket into the receiver ------------------------
-    if (ntripClient.connected())
-    {
-      uint8_t rtcmData[512 * 4]; // Most incoming data is around 500 bytes but may be larger
-
-      // Drain the socket completely, in buffer-sized slices. A single-buffer
-      // read left the rest queued in lwIP when an iteration ran slow, up to
-      // the 5.7 kB TCP window pinned in pbufs (the observed heap dips), and a
-      // zero-window stall toward the caster. The byte cap is a backstop
-      // against a flooding caster, not an expected limit.
-      uint32_t drainedTotal = 0;
-      while (ntripClient.available() && drainedTotal < NTRIP_DRAIN_MAX_BYTES)
-      {
-        size_t rtcmCount = 0;
-        while (ntripClient.available() && rtcmCount < sizeof(rtcmData))
-        {
-          rtcmData[rtcmCount++] = ntripClient.read();
-        }
-        drainedTotal += rtcmCount;
-
-        // The link is alive: note that independently of whether the push
-        // below wins the mutex. First data also ends the post-connect
-        // grace and resets the reconnect backoff.
-        lastReceivedRTCM_ms = millis();
-        if (!gotDataThisSession)
-        {
-          gotDataThisSession = true;
-          rtcmTimeout_ms = NTRIP_RTCM_TIMEOUT_MS;
-          reconnectDelay_ms = NTRIP_BACKOFF_START_MS;
-        }
-
-        // Push RTCM to the receiver over I2C. Bounded take: when the
-        // position task is in a slow-I2C stretch, dropping one redundant
-        // correction slice beats stalling the link (the 12-26 s portMAX_DELAY
-        // waits here are what killed every session on 2026-08-24).
-        if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
-        {
-          myGNSS.pushRawData(rtcmData, rtcmCount, false);
-          telemetryNoteRtcmPushed(rtcmCount);  // feeds corr_age_ms + bytes_rx
-          xSemaphoreGive(mutexSem);
-          DBG.printf("RTCM pushed to ZED: %u\n", (unsigned)rtcmCount);
-        }
-        else
-        {
-          DBG.printf("RTCM slice dropped (mutex busy): %u\n", (unsigned)rtcmCount);
-        }
-      }
-    }
-
-    // --- GGA push: our position to the caster every 10 s -------------------
-    if (ntripClient.connected() && millis() - lastTransmittedGGA_ms > timeBetweenGGAUpdate_ms)
-    {
-      char localGgaSentence[NMEA_GGA_MAX_LENGTH] = {0};
-      bool shouldSendGga = false;
-
-      // Bounded take; on timeout the gate is left expired, so the next
-      // iteration (~1 s) retries instead of waiting the full 10 s period.
-      if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GGA_MUTEX_TIMEOUT_MS)))
-      {
-        if (ggaSentenceComplete)
-        {
-          strncpy(localGgaSentence, ggaSentence, NMEA_GGA_MAX_LENGTH - 1);
-          localGgaSentence[NMEA_GGA_MAX_LENGTH - 1] = '\0';
-          shouldSendGga = true;
-          ggaSentenceComplete = false;  // start over
-          lastTransmittedGGA_ms = millis();
-        }
-        xSemaphoreGive(mutexSem);
-      }
-
-      if (shouldSendGga)
-      {
-        DBG.print(F("Pushing GGA to server: "));
-        DBG.println(localGgaSentence);
-        ntripClient.print(localGgaSentence);
-        ntripClient.print("\r\n");
-      }
-    }
-
-    // --- Hangup: the no-RTCM window expired (30 s grace after a connect,
-    // 10 s once data has flowed) ---------------------------------------------
-    if (ntripClient.connected() && millis() - lastReceivedRTCM_ms > rtcmTimeout_ms)
-    {
-      DBG.println(F("RTCM timeout. Disconnecting..."));
-      // Socket up but no corrections. This is the signature of a
-      // correction-delivery problem (vs. GNSS degradation, PROJECT-PLAN par. 2)
-      char msg[64];
-      snprintf(msg, sizeof(msg), "no RTCM for %u s, dropping caster connection",
-               (unsigned)(rtcmTimeout_ms / 1000));
-      telemetryEmitError(1, "ntrip_rtcm_timeout", msg);
-      ntripClient.stop();
-      telemetrySetNtripConnected(false);
-      // A session that never delivered a byte counts as a failed attempt:
-      // back off before hammering the caster again.
-      if (!gotDataThisSession) armBackoff();
-    }
-
     // gnss_pipe_stall: a whole iteration over threshold is reported. The
     // 2026-08-21/24 causes (20 Hz nav rate, polled getters, unbounded mutex
     // takes) are fixed; the event stays as a "something is slow" alarm.
-    // Iterations that `continue` above skip this on purpose: their delays
-    // are retry pacing.
     uint32_t iterMs = millis() - iterStart_ms;
     if (iterMs > GNSS_PIPE_STALL_MS)
     {
@@ -1209,16 +719,16 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       {
         lastStallEmit_ms = millis();
         char msg[32];
-        snprintf(msg, sizeof(msg), "ntrip iter %u ms", (unsigned)iterMs);
+        snprintf(msg, sizeof(msg), "corrections iter %u ms", (unsigned)iterMs);
         telemetryEmitError(1, "gnss_pipe_stall", msg);
       }
     }
 
-    vTaskDelay(TASK_WIFI_RTK_DATA_INTERVAL_MS/portTICK_PERIOD_MS);
+    vTaskDelay(TASK_GNSS_CORRECTIONS_INTERVAL_MS/portTICK_PERIOD_MS);
   }
 
   vTaskDelete(NULL);
-} /*** end task_rtk_get_corrrection_data ***/
+} /*** end task_gnss_corrections ***/
 
 /*
 =================================================================================
