@@ -9,3 +9,7 @@ src/CasterSecrets.h
 src/telemetry/fw_version_autogen.h
 tools/fleet-secrets.ini
 tools/__pycache__
+
+# Bench captures and heap exports are dropped in the repo root; never commit them
+/*.log
+/*.csv
