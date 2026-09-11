@@ -17,7 +17,9 @@ Hardware used:
 
 Infrastructure:
 
-* WiFi (e. g. a personal hotspot)
+* an iPhone running RWA Player within BLE range: it is the NTRIP client and
+  proxies the corrections over cellular (ADR-001; the assembly has no radio
+  but BLE)
 * free line of sight between antenna (horizontal placed) an sky
 
 Naming convention (the full glossary is PROJECT-PLAN.md §1.1):
@@ -30,9 +32,8 @@ Naming convention (the full glossary is PROJECT-PLAN.md §1.1):
 * **Board** = the bare ESP32 Feather; only a flashing-time concept
   (CP2104 serial ↔ assembly label in `tools/known-boards.txt`).
 * **Unit** = what you carry with you during the soundwalk: assembly + phone
-  + accessories. The **unit label** (`rwa-hs-N`) is the phone's name and
-  hotspot SSID and the `device_id` in telemetry; by convention it equals the
-  assembly label.
+  + accessories. The **unit label** (`rwa-hs-N`) is the phone's name and the
+  `device_id` in telemetry; by convention it equals the assembly label.
 * **Rover** is the RTK role of the GNSS receiver (corrected against the
   refnet reference station), not a name for the hardware. It survives in
   the firmware name *rtk-rover* only.
@@ -69,50 +70,36 @@ header by hand. `tools/fleet-secrets.ini` (gitignored, optional; template in
 otherwise records the caster credentials for provisioning the phones: since
 ADR-001 the caster account is typed into RWA Player, not compiled in.
 
-The mklittlefs file in the root dir you have to [get](https://github.com/earlephilhower/mklittlefs/releases) depending on your OS.
-If you have the Arduino IDE installed, you can borrow it from there too. On macOS you can find it here: `~/Library/Arduino15/packages/esp32/tools/mklittlefs/3.0.0-gnu12-dc7f933/mklittlefs`.  Help for setup the file system you can find [here](https://randomnerdtutorials.com/esp8266-nodemcu-vs-code-platformio-littlefs/). This project was created on macOS (silicon).
-
 [Support RTK2GO](http://new.rtk2go.com/donations-and-support/)
 
 ### PlatformIO
 
-Update the serial-port paths in [`platformio.ini`](./platformio.ini) to the values read from PlatformIO "Devices" command (`platformio device list`).
+[`platformio.ini`](./platformio.ini) carries no serial-port keys on purpose:
+`tools/flash.sh` and `tools/watch.sh` discover the attached board through
+`tools/known-boards.txt`. Build, flash and observe are described in
+[CLAUDE.md](./CLAUDE.md) (Build & flash); the runtime architecture in
+[DOCUMENTATION.md](./DOCUMENTATION.md).
 
 ### ESP32 board (red) LED codes
 
 ![blink-codes](./assets/blink-codes.svg)
 
-> **Stale:** the diagram still shows the old startup order (`setupWiFi()`
-> → "wait for WiFi connection" → `setupBLE()`). The list below is current; the
-> diagram needs re-exporting from its draw.io source.
+> **Stale:** the diagram still shows the WiFi-era startup (`setupWiFi()`
+> → "wait for WiFi connection" → `setupBLE()`); there is no WiFi since
+> ADR-001. The list below is current; the diagram needs re-exporting from its
+> draw.io source.
 
 #### Startup
 
 * 1.0s 2x: started setup (blocking)
 * 0.125s 2x 1.0s 1x (watch for this to spot reboots) (blocking)
 * `setupBLE` no blinking. unit is now discoverable
-* `setupWiFi`
-* 0.125s 4x (blocking, after the single WiFi connection attempt)
 * `setupGNSS`
   * while myGNSS.begin
     * 0.5s: setupGNSS() failed (I2C setup) (blocking)
-* FreeRTOS queues and tasks setup
-
-`setupWiFi()` makes one bounded attempt and setup continues regardless. A
-missing hotspot is handled at runtime by `task_rtk_get_corrrection_data` (its
-1.0s/0.1s pattern below), so that blink code now also means "booted before the
-hotspot was up", not only "lost it".
+* FreeRTOS mutex and tasks setup
 
 #### Runtime
-
-> legacy, check if still applicable
->
-> * 1.0 s RTK: setupGNSS() failed (I2C communication)
-
-`task_rtk_get_corrrection_data`
-
-* while wait for WiFi Connection
-  * 1.0s, 0.1s: connection to AP lost (blocking)
 
 Arduino `loop()`
 

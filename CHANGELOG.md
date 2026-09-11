@@ -99,6 +99,14 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
   retires the generator; until then `RTK_BOARD` or the attached board still
   selects it at build time.
 
+- **Docs follow the one-radio design.** `DOCUMENTATION.md` (task table with
+  `task_gnss_corrections`, the RTCM FIFO under synchronisation, boot order
+  without the WiFi step, the two new callback contexts), `README.md`
+  (infrastructure, blink codes without the WiFi stages, the stale mklittlefs
+  and serial-port paragraphs gone) and `CLAUDE.md` (hardware, operator needs,
+  RAM and flash budgets, the memory escalation ladder marked superseded, work
+  queue item 7).
+
 - **Telemetry contract, breaking** (PROJECT-PLAN.md par. 4.3 and 5.3, v4).
   Retired on the BLE leg, never to be reused: heartbeat keys 12 `wifi_rssi`,
   13 `ntrip_connected`, 18 `loops_ntrip`; event type 3 `ntrip_status`; error

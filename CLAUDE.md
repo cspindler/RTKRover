@@ -12,6 +12,8 @@ semantics here without updating PROJECT-PLAN.md and the `rwa-player` decoder.
 - u-blox ZED-F9P (SparkFun GPS-RTK-SMA, Qwiic/I²C): RTK GNSS, UBX protocol
 - Bosh BNO080 (SparkFun breakout, I²C): head-tracking IMU
 - Both sensors use a dedicated I²C bus
+- Radio: BLE only (ADR-001, 0.48.0). The phone is the NTRIP client and proxies
+  RTCM down / GGA up over BLE (PROJECT-PLAN.md §5.6); the firmware has no WiFi.
 
 ## Runtime architecture
 
@@ -69,7 +71,9 @@ each fail in their own way, and bundling them hid which one broke:
 
 - The capture window counts serial time only; the ~37 s upload is not billed
   against it. Don't set the window shorter than the output you're waiting for —
-  WiFi association alone takes ~11 s to first log line.
+  the phone connects ~1 s after advertising, but the first `gnss_fix` with a
+  fix, and with it the first GGA notify, needs the receiver to acquire (tens of
+  seconds from cold).
 - `watch.sh` uses `~/.platformio/penv/bin/python`, the only interpreter here with
   pyserial. The system `python3` does not have it.
 - **Debug builds block in `setup()`** on `Press any key to continue...`
@@ -96,35 +100,37 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 
 1. The board physically plugged in over USB (nothing else is a substitute, the
    port cannot be reached remotely).
-2. `tools/fleet-secrets.ini` present (gitignored; copy from
-   `tools/fleet-secrets_example.ini`) and a reachable WiFi/NTRIP caster.
-   `src/CasterSecrets.h` is generated from it at build time by
-   `tools/gen_caster_secrets.py` (extra_script, like the fw-version header).
-   Never edit the header by hand. Per-assembly facts are keyed by the assembly label
-   from `tools/known-boards.txt`; each unit has its own caster username
-   (`musikbasel01`, `musikbasel02`, ...). Board selection: `RTK_BOARD` (label or
-   serial; `flash.sh` exports its board argument), else the single attached
-   unit. With neither, the previous header is kept (or an empty placeholder is
-   written on a fresh clone) so hardware-less builds still work; a selected
-   board with incomplete secrets fails the build on purpose.
-3. The unit's phone with RWA Player running, providing the WiFi hotspot:
-   - Hotspot name = unit label (e.g. `rwa-hs-2`, which is also the assembly's
-     BLE name), so the SSID needs no config of its own. A `wifi_ssid` override
-     per assembly section exists for hotspots not yet renamed.
-   - In RWA Player, Settings -> Unit ID = the unit label; the app connects to
-     the assembly advertising that name. Only an assembly without a
-     fleet-secrets entry advertises the fallback `rtkrover-<chip-id>` (last 6
-     hex digits of the ESP32 MAC, e.g. `rtkrover-2d3810`). Enter that under
-     Settings -> Headset assembly to connect to it.
+2. The board listed in `tools/known-boards.txt` (CP2104 serial → assembly
+   label). The label is the BLE name; `tools/gen_assembly_config.py` writes it
+   into `src/AssemblyConfig.h` at build time (extra_script, like the
+   fw-version header). Never edit the header by hand. Board selection:
+   `RTK_BOARD` (label or serial; `flash.sh` exports its board argument), else
+   the single attached unit. With neither, the previous header is kept (or an
+   empty placeholder is written on a fresh clone) so hardware-less builds still
+   work. `tools/fleet-secrets.ini` (gitignored; template
+   `tools/fleet-secrets_example.ini`) is optional since ADR-001: the build reads
+   only a `ble_name` override from it. The caster credentials it records (each
+   unit has its own caster username, `musikbasel01`, `musikbasel02`, ...) are
+   for provisioning the phones, not the firmware.
+3. The unit's phone with RWA Player running, within BLE range:
+   - Settings -> Unit ID = the unit label; the app connects to the assembly
+     advertising that name. A board not in `known-boards.txt` advertises the
+     fallback `rtkrover-<chip-id>` (last 6 hex digits of the ESP32 MAC, e.g.
+     `rtkrover-2d3810`); enter that under Settings -> Headset assembly to
+     connect to it.
+   - Corrections flow only while the app's NTRIP client (caster credentials in
+     its Settings) holds a session: the assembly has no path to the caster of
+     its own. Without the app the receiver runs plain GNSS, no RTK.
 
 ## Conventions & constraints
 
-- RAM is tight: BLE + WiFi coexist. Prefer static allocation; check free heap
-  impact of any new buffer. The telemetry ring buffer is capped at 4 KB
-  (8 KB caused connect-time OOM panics, measured 2026-07-29). Steady-state
-  free heap is ~18 KB with ~13 KB min — verify with the debug build's 10 s
-  heap/stack-watermark report before adding buffers, and keep task stacks
-  sized from measured watermarks (see setup() comment in main.cpp).
+- RAM: BLE is the only radio since 0.48.0 (ADR-001), which took steady free
+  heap from ~11 KB to the ~60 KB range (CHANGELOG 0.48.0 bench notes). Still
+  prefer static allocation and check the free-heap impact of any new buffer
+  with the debug build's 10 s heap/stack-watermark report, and keep task stacks
+  sized from measured watermarks (see setup() comment in main.cpp). The
+  telemetry ring's 4 KB and the RTCM FIFO's 4 KB are sized for their purpose,
+  no longer by the heap.
 - Never log with blocking printf from time-critical tasks; route through the
   telemetry ring buffer (or ESP_LOG for local-USB debugging only).
 - Error events use stable short `code` strings (e.g. `i2c_timeout_bno080`) — these
@@ -132,24 +138,23 @@ Hardware-in-the-loop iteration needs, once per machine/session:
 - Versioning: `fw_version` = semver + short git hash, embedded at build time and
   reported in every heartbeat event.
 - Partition table: `min_spiffs.csv`, decided 2026-09-11 (two OTA slots of
-  1.92 MB, `ota_0`/`ota_1` + `otadata`). The stock `default.csv` (1.25 MB per
-  slot) cannot hold the ~1.63 MB image; `min_spiffs.csv` leaves ~330 KB (16 %)
-  headroom. Nothing in the tree uses SPIFFS or LittleFS, so its 128 KB region
-  costs nothing. The tree shipped `no_ota.csv` until then.
-- Flash headroom is the binding budget, not just RAM (RAM is at 18 %). Check the
-  `Flash:` line of every `pio run` and flag growth toward the slot ceiling.
-- **Memory escalation ladder** (decided 2026-07-29; context: Arduino framework
-  ships ESP-IDF 4.4.7 precompiled, so IDF config like Bluedroid pools and WiFi
-  buffer counts is NOT tunable here — no `menuconfig`). If heartbeat telemetry
-  shows sustained free-heap minimums under ~6–8 KB, escalate in this order;
-  do not jump straight to an IDF migration:
-  1. Port BLE to NimBLE-Arduino (stays in Arduino; frees ~30–50 KB heap AND
-     ~100 KB flash, which also widens the OTA slot headroom above). Expected
-     first lever.
-  2. Rebuild as "Arduino as an IDF component" (code unchanged, unlocks
-     `sdkconfig`/menuconfig for IDF memory knobs).
-  3. Full IDF rewrite — effectively never justified; option 2 provides the
-     same knobs without one.
+  1.92 MB, `ota_0`/`ota_1` + `otadata`). Chosen when the image was ~1.63 MB and
+  the stock `default.csv` slots (1.25 MB) could not hold it; since 0.48.0 (WiFi
+  removed) the image is ~1.21 MB, 61 % of the slot. Nothing in the tree uses
+  SPIFFS or LittleFS, so its 128 KB region costs nothing. The tree shipped
+  `no_ota.csv` until then; changing tables costs one USB flash per unit, so
+  it stays.
+- Check the `Flash:` line of every `pio run` and flag growth toward the slot
+  ceiling; the ~750 KB of headroom since 0.48.0 is what OTA (ADR-002) works in.
+- **Memory escalation ladder** (decided 2026-07-29, superseded by ADR-001 on
+  2026-09-11). It existed because BLE + WiFi + lwIP left ~6–8 KB minimum free
+  heap with no IDF knobs to turn (the Arduino framework ships ESP-IDF 4.4.7
+  precompiled, no `menuconfig`). Removing WiFi freed ~50 KB, so none of its
+  triggers apply. Kept for reference should a second radio ever return:
+  1. Port BLE to NimBLE-Arduino (stays in Arduino; ~30–50 KB heap, ~100 KB
+     flash; `src/ble_link.cpp` is the one file it rewrites).
+  2. Rebuild as "Arduino as an IDF component" (unlocks `sdkconfig`).
+  3. Full IDF rewrite — effectively never justified.
 
 ## Current work queue
 
@@ -162,3 +167,9 @@ Hardware-in-the-loop iteration needs, once per machine/session:
    PROJECT-PLAN §8.1) is not started.
 6. Live end-to-end check with the updated RWA Player build (device events in
    the Diagnostics tab), then watch real events land in Grafana (§9 step 4)
+7. ADR-001 firmware side done 2026-09-11 (branch `ble-only-transport`, 0.48.0):
+   WiFi and the NTRIP client removed, RTCM downlink `713D0006`, GGA uplink
+   `713D0007`, 15–30 ms connection-interval request. Open, in order: the
+   rwa-player NTRIP client and decoder update for the retired heartbeat keys
+   (PROJECT-PLAN.md §6 item 6), the ADR's §7 bench A/B for acceptance, the
+   Grafana panels keyed on the retired fields.
