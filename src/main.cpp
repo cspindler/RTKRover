@@ -832,10 +832,12 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   credentialsExists &= casterUser[0] != '\0';
   credentialsExists &= mountPoint[0] != '\0';
 
-  while (!credentialsExists)
+  if (!credentialsExists)
   {
-    DBG.println(F("RTK credentials incomplete!\nFreezing RTK task."));
-    blinkOneTime(2000, true);
+    // Placeholder build (no fleet-secrets entry): nothing to connect to.
+    // Park the task; heading and telemetry keep running.
+    DBG.println(F("RTK credentials incomplete! Suspending RTK task."));
+    vTaskSuspend(NULL);
   }
 
   WiFiClient ntripClient;

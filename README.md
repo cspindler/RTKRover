@@ -121,11 +121,9 @@ hotspot was up", not only "lost it".
 > legacy, check if still applicable
 >
 > * 1.0 s RTK: setupGNSS() failed (I2C communication)
-> * 2.0 s RTK: credentialsExists false
 
 `task_rtk_get_corrrection_data`
 
-* no credentials (needs to removed)
 * while wait for WiFi Connection
   * 1.0s, 0.1s: connection to AP lost (blocking)
 
