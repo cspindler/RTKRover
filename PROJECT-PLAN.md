@@ -330,6 +330,7 @@ Tracker service (`713D0000-...`), notify-only except where marked:
 | Heading, ASCII (legacy) | `713D0002-503E-4C75-BA94-3148F18D941E` | RWAHT (all versions); rtk-rover <= 0.45.x |
 | Raw position | `713D0004-503E-4C75-BA94-3148F18D941E` | rtk-rover |
 | RTCM downlink, **write** (§5.6) | `713D0006-503E-4C75-BA94-3148F18D941E` | rtk-rover ≥ 0.48.0; app → assembly |
+| GGA uplink (§5.6) | `713D0007-503E-4C75-BA94-3148F18D941E` | rtk-rover ≥ 0.48.0 |
 | *(reserved)* | `713D0003-503E-4C75-BA94-3148F18D941E` | historic `TRACKERSERVICERX`, never reuse |
 
 The telemetry service is **not advertised**: the 31-byte advertisement is
@@ -491,6 +492,7 @@ correction loop rides on the tracker service:
 | | UUID | direction | property |
 | --- | --- | --- | --- |
 | RTCM downlink | `713D0006-503E-4C75-BA94-3148F18D941E` | app → assembly | write without response (write with response is accepted too) |
+| GGA uplink | `713D0007-503E-4C75-BA94-3148F18D941E` | assembly → app | notify |
 
 **RTCM downlink.** The app writes the caster's byte stream as it arrives, each write
 carrying the next bytes of the stream in order, at most ATT MTU − 3 bytes per write (514 at
@@ -502,6 +504,17 @@ pushed to the ZED-F9P over I²C by the corrections task; `rtcm_bytes` in `heartb
 `corr_age_ms` in `gnss_fix` prove the bytes reached the receiver, `rtcm_fifo_overflow`
 (§4.3) reports chunks that did not. Wire load: VRS epochs are 1.0–1.4 KB at 1 Hz, i.e.
 6–8 writes per second at MTU 185, well inside one connection interval.
+
+**GGA uplink.** The receiver's own `$GPGGA` sentence, ASCII without the trailing CRLF, one
+notification per sentence, at most 1 Hz (the receiver emits GGA every tenth navigation
+epoch), and only sentences with a fix (quality field ≥ 1): a fixless GGA is useless to the
+VRS, which computes its virtual station from it. The app forwards the latest one to the
+caster with CRLF appended every ~10 s, and seeds the caster from CoreLocation until the
+first one arrives (ADR-001 par. 2). The sentence is sent as-is from the receiver; the app
+neither parses nor rebuilds it. Until the MTU exchange (MTU 23) the ~80 B sentence does not
+fit one notification and is skipped, not split: there is no framing to reassemble. The
+characteristic going quiet means the receiver lost its fix (like `713D0004` going quiet);
+the app keeps sending its last GGA or the CoreLocation one.
 
 ---
 
@@ -519,8 +532,9 @@ pushed to the ZED-F9P over I²C by the corrections task; `rtcm_bytes` in `heartb
    connected assembly kind and id).
 6. **NTRIP client** (ADR-001): hold the caster session over cellular with the unit's
    credentials (a setting next to Unit ID; the firmware embeds none), write the RTCM
-   stream to the assembly (§5.6), send GGA to the caster every ~10 s, and report the
-   session as `ntrip_status` events plus `heartbeat.ntrip_connected` (`source` = `phone`).
+   stream to the assembly and forward the assembly's GGA to the caster every ~10 s
+   (§5.6; CoreLocation-seeded until the assembly delivers one), and report the session
+   as `ntrip_status` events plus `heartbeat.ntrip_connected` (`source` = `phone`).
 
 ---
 

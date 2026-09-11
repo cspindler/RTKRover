@@ -165,7 +165,8 @@ static xSemaphoreHandle mutexSem;
 /**
  * @brief Task for the receiver's correction side: pushes the RTCM chunks the
  *        phone wrote (corrections.cpp FIFO) into the receiver, dispatches the
- *        NMEA callbacks and runs the receiver watchdog (recovery ladder).
+ *        NMEA callbacks (which notify the GGA to the phone) and runs the
+ *        receiver watchdog (recovery ladder).
  *
  * @param pvParameters Void pointer, no parameter used here
  */
@@ -348,13 +349,45 @@ void loop()
 // (bench 4.1, 2026-08-24) and drives the recovery ladder.
 static volatile uint32_t lastGgaHeard_ms = 0;
 
+// GGA fix-quality field (7th comma-separated field; 0 = no fix). Returns 0 on
+// any parse shortfall: an unparseable sentence shouldn't count as a fix.
+static uint8_t ggaFixQuality(const uint8_t *nmea, uint16_t length)
+{
+  uint8_t commas = 0;
+  for (uint16_t i = 0; i < length; i++)
+  {
+    if (nmea[i] != ',') continue;
+    if (++commas < 6) continue;
+    if (i + 1 < length && nmea[i + 1] >= '0' && nmea[i + 1] <= '9')
+      return nmea[i + 1] - '0';
+    return 0;
+  }
+  return 0;
+}
+
 // Called from myGNSS.checkCallbacks() on the corrections task for every
 // complete GGA sentence (NMEA_GGA_data_t: see u-blox_structs.h).
 void callbackGPGGA(NMEA_GGA_data_t *nmeaData)
 {
-  (void)nmeaData;
-  // A GGA arriving proves the receiver is producing output.
+  // Liveness first, unconditionally: a GGA arriving proves the receiver is
+  // producing output, fix or not.
   lastGgaHeard_ms = millis();
+
+  // GGA uplink (713D0007, PROJECT-PLAN.md par. 5.6): only sentences with a
+  // fix go to the phone, which forwards the latest one to the caster. A
+  // fixless GGA is unusable to the VRS (it computes its virtual station from
+  // it), and the app seeds the caster from CoreLocation until the first one
+  // arrives (ADR-001 par. 2). No mutex here: notify() only posts to the BT
+  // task.
+  if (ggaFixQuality(nmeaData->nmea, nmeaData->length) == 0) return;
+  if (correctionsNotifyGga(nmeaData->nmea, nmeaData->length))
+  {
+    size_t n = nmeaData->length;
+    while (n > 0 && (nmeaData->nmea[n - 1] == '\r' || nmeaData->nmea[n - 1] == '\n')) n--;
+    DBG.print(F("GGA to phone: "));
+    DBG.write(nmeaData->nmea, n);
+    DBG.println();
+  }
 }
 
 /**
@@ -705,7 +738,8 @@ void task_gnss_corrections(void *pvParameters)
 
     // Dispatch pending NMEA callbacks so callbackGPGGA runs every iteration:
     // it is the liveness signal (lastGgaHeard_ms) the recovery ladder depends
-    // on. Must stay OUTSIDE mutexSem (gnssCheckUbloxLocked says why).
+    // on, and the GGA uplink. Must stay OUTSIDE mutexSem (gnssCheckUbloxLocked
+    // says why).
     myGNSS.checkCallbacks();
 
     if (gnssRecoveryTick()) iterStart_ms = millis();
@@ -797,7 +831,7 @@ void setupBLE(void)
     REALTIME_KINEMATICS_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pRealtimeKinematicsCharacteristic->addDescriptor(new BLE2902());
 
-  // The correction loop (RTCM down), ADR-001.
+  // The correction loop (RTCM down, GGA up), ADR-001.
   correctionsBleSetup(pService);
 
   pService->start();

@@ -34,6 +34,19 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
   (severity 1, rate-limited to one per 10 s) when chunks were evicted
   unpushed. The heartbeat AUnit test covers the new counter.
 
+- **GGA uplink over BLE: `713D0007`, notify** (ADR-001 par. 2, its "1 Hz
+  notify of the GGA sentence" option; PROJECT-PLAN.md par. 5.6).
+  `callbackGPGGA` notifies the receiver's own `$GPGGA` (CRLF stripped) for
+  every sentence with a fix, so the app forwards exactly what the NTRIP task
+  used to send: the 0.45.1 rule "no fixless GGA to the caster" stays, and
+  the app seeds from CoreLocation until the first one. Chosen over having
+  the app build GGA from `gnss_fix`: that event carries PDOP not HDOP and
+  ellipsoidal not MSL height, and rides the lowest-priority telemetry drain,
+  while the sentence itself is already parsed, free, and on the corrections
+  task. Skipped, not split, while the MTU is still 23. `ggaFixQuality()`
+  returns for the gate; no mutex in the callback any more (`notify()` only
+  posts to the BT task).
+
 ### Removed
 
 - **WiFi and the NTRIP client** (ADR-001 par. 2). The assembly no longer
