@@ -817,19 +817,20 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   int timeBetweenGGAUpdate_ms = 10000; //GGA is required for Rev2 NTRIP casters. Don't transmit but once every 10 seconds
   long lastTransmittedGGA_ms = 0;
 
-  // Read RTK credentials
-  String casterHost = kCasterHost;
-  String casterPort = kCasterPort;
-  String casterUser = kCasterUser;
-  String casterPass = kCasterPass;
-  String mountPoint = kMountPoint;
+  // Caster credentials: compile-time constants from CasterSecrets.h. The
+  // port is parsed once here instead of per connect.
+  const char *casterHost = kCasterHost;
+  const uint16_t casterPort = (uint16_t)strtoul(kCasterPort, NULL, 10);
+  const char *casterUser = kCasterUser;
+  const char *casterPass = kCasterPass;
+  const char *mountPoint = kMountPoint;
 
-  // Check RTK credentials
+  // Check RTK credentials (empty on placeholder builds)
   bool credentialsExists = true;
-  credentialsExists &= !casterHost.isEmpty();
-  credentialsExists &= !casterPort.isEmpty();
-  credentialsExists &= !casterUser.isEmpty();
-  credentialsExists &= !mountPoint.isEmpty();
+  credentialsExists &= casterHost[0] != '\0';
+  credentialsExists &= casterPort != 0;
+  credentialsExists &= casterUser[0] != '\0';
+  credentialsExists &= mountPoint[0] != '\0';
 
   while (!credentialsExists)
   {
@@ -1057,7 +1058,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // WiFi associated, caster disconnected: keep the hotspot's upstream
       // path awake — nothing else is generating traffic in this state, and
       // the gates below can hold us here for minutes. (Self rate-limited.)
-      warmHotspotPath(casterHost.c_str());
+      warmHotspotPath(casterHost);
 
       // Receiver-liveness gate: a mute F9P produces no GGA, and the VRS
       // streams nothing without one. Connecting would only cycle dataless
@@ -1109,17 +1110,17 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           uint32_t slice_ms = min(attemptDelay_ms - waited_ms, (uint32_t)1000);
           vTaskDelay(slice_ms/portTICK_PERIOD_MS);
           waited_ms += slice_ms;
-          warmHotspotPath(casterHost.c_str());
+          warmHotspotPath(casterHost);
         }
         attemptDelay_ms = 0;
         iterStart_ms = millis();  // deliberate pacing, not a pipeline stall
       }
 
       DBG.print(F("Opening socket to "));
-      DBG.println(casterHost.c_str());
+      DBG.println(casterHost);
 
       // Attempt connection
-      if (ntripClient.connect( casterHost.c_str(), (uint16_t)casterPort.toInt() ) == false)
+      if (ntripClient.connect( casterHost, casterPort ) == false)
       {
         DBG.println(F("Connection to caster failed"));
         if (!outageErrorEmitted)
@@ -1134,21 +1135,21 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       else
       {
         DBG.print(F("Connected to "));
-        DBG.print(casterHost.c_str());
+        DBG.print(casterHost);
         DBG.print(F(": "));
-        DBG.println((uint16_t)casterPort.toInt());
+        DBG.println(casterPort);
 
         DBG.print(F("Requesting NTRIP Data from mount point "));
-        DBG.println(mountPoint.c_str());
+        DBG.println(mountPoint);
 
         const int SERVER_BUFFER_SIZE = 512;
         char serverRequest[SERVER_BUFFER_SIZE];
 
         int requestLen = snprintf(serverRequest, SERVER_BUFFER_SIZE, "GET /%s HTTP/1.0\r\nUser-Agent: NTRIP SparkFun u-blox Client v1.0\r\n",
-                mountPoint.c_str());
+                mountPoint);
 
         char credentials[512];
-        if (strlen(casterUser.c_str()) == 0)
+        if (casterUser[0] == '\0')
         {
           strncpy(credentials, "Accept: */*\r\nConnection: close\r\n", sizeof(credentials));
         }
@@ -1157,8 +1158,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           //Pass base64 encoded user:pw
           // length(), not sizeof: sizeof(String) is the object size (~16 B),
           // not the stored text, and %s must get c_str(), never the object.
-          char userCredentials[casterUser.length() + 1 + casterPass.length() + 1]; //The ':' takes up a spot
-          snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser.c_str(), casterPass.c_str());
+          char userCredentials[strlen(casterUser) + 1 + strlen(casterPass) + 1]; //The ':' takes up a spot
+          snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser, casterPass);
 
           DBG.print(F("Sending credentials: "));
           DBG.println(userCredentials);
@@ -1266,7 +1267,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         if (connectionSuccess == false)
         {
           DBG.print(F("Failed to connect to "));
-          DBG.print(casterHost.c_str());
+          DBG.print(casterHost);
           DBG.print(F(": "));
           DBG.println(response);
           if (!outageErrorEmitted)
@@ -1284,7 +1285,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         else
         {
           DBG.print(F("Connected to "));
-          DBG.println(casterHost.c_str());
+          DBG.println(casterHost);
           lastReceivedRTCM_ms = millis();
           // Fresh session: full grace window until the first RTCM (the VRS
           // streams only after our GGA), and nothing received yet.
