@@ -1067,8 +1067,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           {
             nudgeDelay_ms = min(nudgeDelay_ms * 2, (uint32_t)WIFI_RECONNECT_NUDGE_MAX_MS);
           }
+          // Same heap measure as logFreeHeap() and the heartbeat (8-bit
+          // capable internal heap); ESP.getFreeHeap() also counts 32-bit-only
+          // IRAM and read ~2x higher in the same log.
           DBG.printf("WiFi soft reconnect nudge, free heap %u, next in %u ms\n",
-                     ESP.getFreeHeap(), nudgeDelay_ms);
+                     esp_get_free_heap_size(), nudgeDelay_ms);
         }
         blinkOneTime(1000, false);
         blinkOneTime(100, false);
@@ -1192,9 +1195,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           char userCredentials[strlen(casterUser) + 1 + strlen(casterPass) + 1]; //The ':' takes up a spot
           snprintf(userCredentials, sizeof(userCredentials), "%s:%s", casterUser, casterPass);
 
-          DBG.print(F("Sending credentials: "));
-          DBG.println(userCredentials);
-
           base64 b;
           String strEncodedCredentials = b.encode(userCredentials);
           snprintf(credentials, sizeof(credentials), "Authorization: Basic %s\r\n",
@@ -1233,8 +1233,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.print(sizeof(serverRequest));
         DBG.println(F(" bytes available"));
 
-        DBG.println(F("Sending server request:"));
-        DBG.println(serverRequest);
+        // Request line only: the header block carries the Basic-auth
+        // credentials, which must not land in serial captures.
+        DBG.print(F("Sending server request: "));
+        DBG.write((const uint8_t *)serverRequest, strcspn(serverRequest, "\r\n"));
+        DBG.println();
         ntripClient.write(serverRequest, strlen(serverRequest));
 
         // Wait for response.
