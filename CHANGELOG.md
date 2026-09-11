@@ -9,7 +9,16 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
-## [Unreleased - lean pass part 2]
+## [0.47.0] - 2026-09-11
+
+Lean pass, conclusion / continuation of part 1
+
+- Partition table: `min_spiffs.csv`, two 1.92 MB OTA slots (work-queue item 5 closed)
+- BLE connection state in one place: `src/ble_link`
+- `gnss_pipe_stall` instrumentation reduced to the iteration time
+- `task_rtk_get_corrrection_data` split by concern (WiFi ladder, GNSS recovery, NTRIP session)
+- Position pipeline: one task, no queue, notify after the mutex
+- `RTKRoverConfig.h` trimmed to one line of rationale per constant
 
 ### Changed
 
@@ -90,31 +99,42 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   already live in this file; the HardwareX F9P quote and the Qwiic pull-up note
   are gone.
 
-## [Unreleased - lean pass part 1]
+## [Lean pass part 1]
+
+Lean pass, behaviour-preserving cleanups.
+
+Net over the pass: 1064 lines deleted, 110 added; production image
+1,646,457 -> 1,632,817 B (−13.6 kB), no behaviour change intended beyond the
+items listed under Changed and Fixed.
 
 ### Changed
 
-- Lean pass, behaviour-preserving cleanups:
-  - `task_send_rtk_position_via_ble` formats the `713D0004` line with `snprintf`
-    into a 32-byte stack buffer instead of four Arduino `String` temporaries per
-    notification. Same bytes on the wire, but no heap allocation at 10 Hz on a
-    heap with a measured 1.8 kB minimum, and `setValue()` gets the explicit
-    length instead of a `std::string` temporary.
-  - The NTRIP task uses the `CasterSecrets.h` constants as `const char*` instead
-    of copying five of them into `String`s, and parses the port once at task
-    start rather than on every connect.
-  - A placeholder build (no fleet-secrets entry) parks the NTRIP task with
-    `vTaskSuspend` instead of blinking the 2 s LED code forever; heading,
-    position and telemetry run as before. The README LED table had already
-    marked that code for removal.
-  - `bleConnected` is a `volatile bool`. It was declared `float` and read as a
-    boolean by three tasks and the BLE callbacks.
-  - `src/hande_wifi.cpp` renamed to `handle_wifi.cpp`, matching its header.
-  - `DOCUMENTATION.md` rewritten from the code that runs: task table (core,
-    priority, period, stack), synchronisation primitives, boot order, callback
-    contexts.
-  - `.gitignore` covers `*.log` and `*.csv` in the repo root, where
-    `tools/watch.sh` captures and heap-stat exports land.
+- `task_send_rtk_position_via_ble` formats the `713D0004` line with `snprintf`
+  into a 32-byte stack buffer instead of four Arduino `String` temporaries per
+  notification. Same bytes on the wire, but no heap allocation at 10 Hz on a
+  heap with a measured 1.8 kB minimum, and `setValue()` gets the explicit
+  length instead of a `std::string` temporary.
+
+- The NTRIP task uses the `CasterSecrets.h` constants as `const char*` instead
+  of copying five of them into `String`s, and parses the port once at task
+  start rather than on every connect.
+
+- A placeholder build (no fleet-secrets entry) parks the NTRIP task with
+  `vTaskSuspend` instead of blinking the 2 s LED code forever; heading,
+  position and telemetry run as before. The README LED table had already
+  marked that code for removal.
+
+- `bleConnected` is a `volatile bool`. It was declared `float` and read as a
+  boolean by three tasks and the BLE callbacks.
+
+- `src/hande_wifi.cpp` renamed to `handle_wifi.cpp`, matching its header.
+
+- `DOCUMENTATION.md` rewritten from the code that runs: task table (core,
+  priority, period, stack), synchronisation primitives, boot order, callback
+  contexts.
+
+- `.gitignore` covers `*.log` and `*.csv` in the repo root, where
+  `tools/watch.sh` captures and heap-stat exports land.
 
 ### Removed
 
@@ -155,10 +175,6 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 - README: the "Dependencies (currently not in use)" section. Neither library is
   in the tree or in `platformio.ini`.
-
-Net over the pass: 1064 lines deleted, 110 added; production image
-1,646,457 -> 1,632,817 B (−13.6 kB), no behaviour change intended beyond the
-items listed under Changed and Fixed.
 
 ### Fixed
 
