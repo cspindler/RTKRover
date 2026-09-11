@@ -32,18 +32,6 @@
 
 /*
 =================================================================================
-                                Buttons
-=================================================================================
-*/
-#include "Button2.h"
-
-// Button to press to reboot the device
-Button2 rebootButton = Button2(REBOOT_BUTTON_PIN, INPUT, false, false);
-
-void buttonHandler(Button2 &btn);
-
-/*
-=================================================================================
                                 Bluetooth LE
 =================================================================================
 */
@@ -1893,19 +1881,9 @@ void task_bno_orientation_via_ble(void *pvParameters)
 
 /*
 =================================================================================
-                                Button(s)
+                                LED
 =================================================================================
 */
-void buttonHandler(Button2 &btn)
-{
-  if (btn == rebootButton)
-  {
-    digitalWrite(LED_BUILTIN, HIGH);
-    DBG.println(F("rebooting..."));
-    ESP.restart();
-  }
-}
-
 void blinkOneTime(int blinkTime, bool doNotBlock)
 {
   digitalWrite(LED_BUILTIN, HIGH);

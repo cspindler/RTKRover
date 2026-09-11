@@ -303,14 +303,4 @@ PMCID: PMC9123378. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9123378/
 #define BATTERY_DIVIDER_RATIO                2
 #define BATTERY_ADC_SAMPLES                  8    // cheap noise average
 
-/*
-=================================================================================
-                          Button(s) settings
-=================================================================================
-*/
-// Button to press to wipe out stored WiFi and RTK credentials
-#define REBOOT_BUTTON_PIN                    15
-
-// Reset button is just a hardware connection (EN -> GND)
-
 #endif /*** RTK_ROVER_CONFIG_H ***/
