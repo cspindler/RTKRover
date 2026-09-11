@@ -9,6 +9,79 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- Lean pass, behaviour-preserving cleanups:
+  - `task_send_rtk_position_via_ble` formats the `713D0004` line with `snprintf`
+    into a 32-byte stack buffer instead of four Arduino `String` temporaries per
+    notification. Same bytes on the wire, but no heap allocation at 10 Hz on a
+    heap with a measured 1.8 kB minimum, and `setValue()` gets the explicit
+    length instead of a `std::string` temporary.
+  - The NTRIP task uses the `CasterSecrets.h` constants as `const char*` instead
+    of copying five of them into `String`s, and parses the port once at task
+    start rather than on every connect.
+  - A placeholder build (no fleet-secrets entry) parks the NTRIP task with
+    `vTaskSuspend` instead of blinking the 2 s LED code forever; heading,
+    position and telemetry run as before. The README LED table had already
+    marked that code for removal.
+  - `bleConnected` is a `volatile bool`. It was declared `float` and read as a
+    boolean by three tasks and the BLE callbacks.
+  - `src/hande_wifi.cpp` renamed to `handle_wifi.cpp`, matching its header.
+  - `DOCUMENTATION.md` rewritten from the code that runs: task table (core,
+    priority, period, stack), synchronisation primitives, boot order, callback
+    contexts.
+  - `.gitignore` covers `*.log` and `*.csv` in the repo root, where
+    `tools/watch.sh` captures and heap-stat exports land.
+
+### Removed
+
+- **`src/utility/`** (imumaths, vector, matrix, quaternion; 772 lines). Nothing
+  has included it since the Euler conversion moved to the apps with the binary
+  heading frame (0.46.0); the production ELF linked zero bytes of it.
+
+- **The reboot button** (`rebootButton`, `buttonHandler`, `REBOOT_BUTTON_PIN`)
+  and the Button2 dependency. The object was constructed and a handler defined,
+  but nothing ever called `setPressedHandler()` or `rebootButton.loop()`, so a
+  press did nothing. The EN pin gives a hardware reset. −8.5 kB flash.
+
+- **AUnit from the production image.** `TestsRTKRover.h` was included
+  unconditionally, so its two placeholder tests (`correct` / `incorrect`)
+  registered at static-init time and linked the test runner into every build.
+  The include is under `#ifdef TESTING` now and the placeholders are gone; the
+  telemetry suites are unchanged.
+
+- The non-ESP32 base64 path (`#else` on `ARDUINO_ARCH_ESP32`). The board is
+  fixed in `platformio.ini` and the branch could not have compiled here
+  (`Base64.h` is not a dependency). The ESP32 path no longer copies the encoded
+  `String` into a VLA before printing it.
+
+- The per-task manual stack-measurement scaffolding: four unused
+  `uxHighWaterMark` locals, their commented-out print blocks, and the `setup()`
+  comment asking to uncomment them. The debug build's `loop()` has printed every
+  task's watermark every 10 s since 2026-07-29, which is the procedure the
+  remaining comment describes.
+
+- Dead declarations: the `beginClient()` and `wipeWiFiCredentials()` prototypes
+  (never defined; there is no filesystem), the `lastTime` global, and four
+  config macros without a use (`DEFAULT_KEY`, `PAYLOAD_BUF_LEN`,
+  `I2C_FREQUENCY_100K`, `BNO080_STEP_CNT_UPDATE_RATE_MS`).
+
+- The `ESP_ERROR_CHECK` redefinition in `RTKRoverConfig.h`. Its comment claimed
+  it deactivated brownout detection; it re-implemented IDF's default
+  log-and-assert, and nothing in `src/` calls it.
+
+- README: the "Dependencies (currently not in use)" section. Neither library is
+  in the tree or in `platformio.ini`.
+
+Net over the pass: 1064 lines deleted, 110 added; production image
+1,646,457 -> 1,632,817 B (−13.6 kB), no behaviour change intended beyond the
+items listed under Changed and Fixed.
+
+### Fixed
+
+- The NTRIP credentials check rejects a port that does not parse. Previously a
+  non-numeric port passed the check and the task connected to port 0.
+
 [0.46.2] - 2026-09-11
 
 ### Changed
