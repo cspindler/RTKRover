@@ -82,6 +82,17 @@ items listed under Changed and Fixed.
 - The NTRIP credentials check rejects a port that does not parse. Previously a
   non-numeric port passed the check and the task connected to port 0.
 
+- Debug builds no longer print the caster credentials. The NTRIP task logged
+  `user:password` in clear text before encoding it, and then the whole request
+  including the `Authorization: Basic` header (the same secret, base64).
+  `tools/watch.sh` captures land in the repo root and get pasted around; only
+  the request line (`GET /<mount> HTTP/1.0`) is printed now.
+
+- The WiFi nudge log line reports the same heap measure as `logFreeHeap()` and
+  the heartbeat (`esp_get_free_heap_size()`, the 8-bit-capable internal heap).
+  It used `ESP.getFreeHeap()`, which also counts 32-bit-only IRAM and read
+  ~36 kB next to the loop report's ~18 kB in the same capture.
+
 [0.46.2] - 2026-09-11
 
 ### Changed
