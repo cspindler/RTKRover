@@ -56,7 +56,9 @@ the NTRIP client, and the telemetry contract loses the WiFi/NTRIP fields.
   request, socket drain, GGA push, RTCM timeout), the hotspot path warmer,
   the `WIFI_*` / `NTRIP_*` / `HOTSPOT_*` constants and the 300 ms radio
   stagger in `setup()`. What that task did *for the receiver* survives as
-  `task_gnss_corrections` (core 0, priority 2, 100 ms, 6 KB): the NMEA
+  `task_gnss_corrections` (core 0, priority 2, 100 ms, 8 KB: a 6 KB first
+  cut measured 512 B of margin, the GGA `notify()` runs deeper than the old
+  socket drain did): the NMEA
   callback dispatch and the receiver watchdog / recovery ladder. The GGA
   callback keeps only the liveness timestamp; the fix-quality copy for the
   caster and its mutex take are gone with the caster. `GNSS_MUTEX_TIMEOUT_MS`

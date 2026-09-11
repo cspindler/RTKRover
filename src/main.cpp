@@ -290,10 +290,10 @@ void setup()
   corruption. 2026-07-29: total 21 KB, down from 35 KB - the freed 14 KB of
   heap is what ended the connect-time OOM panics (vQueueDelete assert /
   lock_init_generic abort). 2026-09-11: 17 KB, the position sender task and
-  its queue merged into the position task. 0.48.0: 14 KB, the NTRIP task and
-  its socket buffers gone (ADR-001).
+  its queue merged into the position task. 0.48.0: 16 KB, the NTRIP task's
+  socket buffers gone (ADR-001); its successor measured 512 B free at 6 KB.
   */
-  int stack_size_task_gnss_corrections = 1024 * 6;               // NTRIP task: min free 2792 of 9 KB with 3 KB of socket buffers; re-measured 0.48.0
+  int stack_size_task_gnss_corrections = 1024 * 8;               // min free 512 at 6 KB (2026-09-11): the GGA notify() is deeper than the old socket drain
   int stack_size_task_rtk_get_rover_position = 1024 * 4;         // min free 2344 before the merge; notify() added
   int stack_size_task_bno_orientation_via_ble = 1024 * 4;        // min free 2080
 
