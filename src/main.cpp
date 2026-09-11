@@ -12,7 +12,6 @@
  * @date 2026-09-11
  ******************************************************************************/
 
-
 #include <Arduino.h>
 #include <Wire.h> // BNO080 and uBlox GNSS
 #include <BLEDevice.h>
@@ -208,7 +207,6 @@ void setupBNO080(void);
 #include <Base64.h> //nfriendly library from https://github.com/adamvr/arduino-base64, will work with any platform
 #endif
 
-
 SFE_UBLOX_GNSS myGNSS;
 
 /**
@@ -393,13 +391,6 @@ void setup()
   // FreeRTOS
   mutexSem = xSemaphoreCreateMutex();
   xQueueSetup();
-  /*
-  Stack sizes of the tasks. You have to measure the used size in the task (set a high value for first run) and
-  after that you can reduce the stack size to an fitting smaller value. This have to repeated if
-  the task code is changed. There are no rules, just measure and adjust (thats why its a magic number).
-  For measurement you need to uncomment the uxHighWaterMark related code in the task (setup and loop).
-  After measurement comment out it again.
-  */
   /*
   Sizes from the 2026-07-29 watermark measurement (debug loop() prints
   "stack min free" every 10 s = bytes of stack never touched). Kept margin is
@@ -780,10 +771,6 @@ void task_rtk_get_rover_position(void *pvParameters)
 {
   (void)pvParameters;
 
-  // Measure stack size
-  UBaseType_t uxHighWaterMark;
-
-
   while (true)
   {
     telemetryNotePositionLoop();  // heartbeat liveness counter (key 19)
@@ -791,11 +778,6 @@ void task_rtk_get_rover_position(void *pvParameters)
     if (xSemaphoreTake(mutexSem, portMAX_DELAY))
     {
       updatePosition();
-
-      // Measure stack size (last was 2304)
-      // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-      // DBG.print(F("task_rtk_get_rover_position loop, uxHighWaterMark: "));
-      // DBG.println(uxHighWaterMark);
 
       xSemaphoreGive(mutexSem);
     }
@@ -837,9 +819,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
   int timeBetweenGGAUpdate_ms = 10000; //GGA is required for Rev2 NTRIP casters. Don't transmit but once every 10 seconds
   long lastTransmittedGGA_ms = 0;
-
-  // Measure stack size
-  UBaseType_t uxHighWaterMark;
 
   // Read RTK credentials
   String casterHost = kCasterHost;
@@ -1491,12 +1470,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       }
     }
 
-    // Measure stack size (last was 19320)
-    // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-    // DBG.print(F("task_rtk_get_corrrection_data loop, uxHighWaterMark: "));
-    // DBG.println(uxHighWaterMark);
-    // } /*** End if (xSemaphoreTake(mutexSem, portMAX_DELAY)) ***/
-
     // gnss_pipe_stall: a whole iteration over threshold gets reported with
     // its phase breakdown (any remainder beyond the four phases is connect /
     // response-wait time). Iterations that `continue` above skip this on
@@ -1638,11 +1611,6 @@ void task_send_rtk_position_via_ble(void *pvParameters)
 
   while (!bleConnected) blinkOneTime(100, true);
 
-  UBaseType_t uxHighWaterMark;
-  // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-  // DBG.print(F("task_send_rtk_position_via_ble setup, uxHighWaterMark: "));
-  // DBG.println(uxHighWaterMark);
-
   while (true)
   {
     if (bleConnected)
@@ -1675,17 +1643,11 @@ void task_send_rtk_position_via_ble(void *pvParameters)
         pRealtimeKinematicsCharacteristic->notify();
       }
 
-      /*  Measure stack size (last was 9356) */
-      // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-      // DBG.print(F("task_send_rtk_position_via_ble loop, uxHighWaterMark: "));
-      // DBG.println(uxHighWaterMark);
-
     } /*** if (bleConnected) ends ***/
     else
     {
       blinkOneTime(100, true);
     }
-
 
     vTaskDelay(TASK_RTK_BLE_INTERVAL_MS/portTICK_PERIOD_MS);
     // taskYIELD();
@@ -1755,12 +1717,6 @@ void task_bno_orientation_via_ble(void *pvParameters)
   // a sample not yet transmitted.
   bool frameFresh = false;
   uint32_t lastHeadingNotify_ms = 0;
-
-  // Measure stack size
-  UBaseType_t uxHighWaterMark;
-  // uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-  // DBG.print(F("task_bno_orientation_via_ble setup, uxHighWaterMark: "));
-  // DBG.println(uxHighWaterMark);
 
   while (true)
   {
