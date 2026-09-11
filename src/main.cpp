@@ -199,13 +199,7 @@ void setupBNO080(void);
                                 GNSS
 =================================================================================
 */
-// The ESP32 core has a built in base64 library but not every platform does
-// We'll use an external lib if necessary.
-#if defined(ARDUINO_ARCH_ESP32)
-#include "base64.h" //Built-in ESP32 library
-#else
-#include <Base64.h> //nfriendly library from https://github.com/adamvr/arduino-base64, will work with any platform
-#endif
+#include "base64.h" // ESP32 core base64, for the NTRIP basic-auth header
 
 SFE_UBLOX_GNSS myGNSS;
 
@@ -1166,19 +1160,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           DBG.print(F("Sending credentials: "));
           DBG.println(userCredentials);
 
-          #if defined(ARDUINO_ARCH_ESP32)
-          // Encode with ESP32 built-in library
           base64 b;
           String strEncodedCredentials = b.encode(userCredentials);
-          char encodedCredentials[strEncodedCredentials.length() + 1];
-          strEncodedCredentials.toCharArray(encodedCredentials, sizeof(encodedCredentials)); //Convert String to char array
-          snprintf(credentials, sizeof(credentials), "Authorization: Basic %s\r\n", encodedCredentials);
-          #else
-          // Encode with nfriendly library
-          int encodedLen = base64_enc_len(strlen(userCredentials));
-          char encodedCredentials[encodedLen]; //Create array large enough to house encoded data
-          base64_encode(encodedCredentials, userCredentials, strlen(userCredentials)); //Note: Input array is consumed
-          #endif
+          snprintf(credentials, sizeof(credentials), "Authorization: Basic %s\r\n",
+                   strEncodedCredentials.c_str());
         }
 
         // Append with the REMAINING space as the bound. The previous
