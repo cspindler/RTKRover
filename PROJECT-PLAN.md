@@ -248,7 +248,7 @@ The codes are part of the contract (they will be alert labels). What the firmwar
 
 | `code` | sev | when |
 | --- | --- | --- |
-| `wifi_disconnected` | 1 | hotspot lost, trying to get back on |
+| `wifi_disconnected` | 1 | hotspot missing or lost for more than 30 s, trying to get back on. |
 | `ntrip_connect_failed` | 1 | could not reach the caster, or it never answered the request |
 | `ntrip_rtcm_timeout` | 1 | no corrections for 10 s, dropping the caster connection |
 | `ntrip_bad_response` | 2 | caster answered, but not with a correction stream (`msg` carries the reply) |

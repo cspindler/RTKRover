@@ -288,42 +288,10 @@ void setup()
   blinkOneTime(125, true);
   blinkOneTime(2000, true);
 
-  setupWiFi();
-
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-  blinkOneTime(125, true);
-
-  // Same soft-retry pattern as the NTRIP task's outage loop (see there):
-  // auto-reconnect plus periodic WiFi.reconnect() nudges; the full driver
-  // re-init only as a rare escape hatch. A unit powered on before its phone
-  // hotspot exists sits in this loop — with a teardown per retry it leaked
-  // ~14.5 kB/h here too (bench 2+4, 2026-08-24).
-  uint32_t bootWifiDown_ms = millis();
-  uint32_t bootLastNudge_ms = millis();
-  while (!WiFi.isConnected())
-  {
-    DBG.println(F("setup(): Not connected to WiFi station"));
-    DBG.printf("WiFi state: %d", WiFi.status());
-    blinkOneTime(1000, false);
-    blinkOneTime(100, false);
-    if (millis() - bootWifiDown_ms >= WIFI_REINIT_AFTER_MS)
-    {
-      bootWifiDown_ms = millis();
-      bootLastNudge_ms = millis();
-      setupWiFi();
-    }
-    else if (millis() - bootLastNudge_ms >= WIFI_RECONNECT_NUDGE_MS)
-    {
-      bootLastNudge_ms = millis();
-      WiFi.reconnect();
-    }
-  }
-
   DBG.print(F("BLE Device name: "));
   DBG.println(getBleName());
 
+  // BLE comes up first, and we don't wait for WiFi in setup().
   setupBLE();
 
   // Telemetry drain: lowest priority in the system (PROJECT-PLAN.md par. 5).
@@ -334,6 +302,18 @@ void setup()
   // 2026-08-24, rwa-hs-4: F9P not ACKing, app received no telemetry at all).
   // The task needs only the ring, BLE and battery/WiFi reads.
   telemetryBleStartTask();
+
+  delay(RADIO_START_STAGGER_MS);
+
+  // One bounded attempt (setupStationMode() gives up after 10 s), then carry on
+  // whatever the result. WiFi has one consumer: task_rtk_get_corrrection_data, that task has a
+  // reconnect ladder for a hotspot that is missing or lost.
+  setupWiFi();
+
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
+  blinkOneTime(125, true);
 
   setupGNSS();
 
@@ -952,6 +932,7 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // wedged driver, after WIFI_REINIT_AFTER_MS without association.
       uint32_t wifiDown_ms = millis();
       uint32_t lastNudge_ms = millis();
+      uint32_t nudgeDelay_ms = WIFI_RECONNECT_NUDGE_MS;
       bool wifiWaited = false;
       while (!WiFi.isConnected())
       {
@@ -959,7 +940,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(F("task_rtk_get_corr_data loop: Not connected to WiFi station"));
         DBG.printf("WiFi state: %d", WiFi.status());
         DBG.println();
-        if (!wifiLossEmitted)
+        // Report only once the outage has outlived the grace.
+        if (!wifiLossEmitted && millis() - wifiDown_ms >= WIFI_LOSS_REPORT_AFTER_MS)
         {
           wifiLossEmitted = true;
           telemetryEmitError(1, "wifi_disconnected", "hotspot lost, reconnecting");
@@ -968,14 +950,19 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         {
           wifiDown_ms = millis();
           lastNudge_ms = millis();
+          nudgeDelay_ms = WIFI_RECONNECT_NUDGE_MS;  // fresh driver, fresh ladder
           DBG.println(F("WiFi down for minutes, full driver re-init"));
           setupStationMode(kWifiSsid, kWifiPw);
         }
-        else if (millis() - lastNudge_ms >= WIFI_RECONNECT_NUDGE_MS)
+        else if (millis() - lastNudge_ms >= nudgeDelay_ms)
         {
           lastNudge_ms = millis();
-          DBG.println(F("WiFi soft reconnect nudge"));
+          DBG.printf("WiFi soft reconnect nudge (next in %u ms)\n", nudgeDelay_ms);
           WiFi.reconnect();
+          if (nudgeDelay_ms < WIFI_RECONNECT_NUDGE_MAX_MS)
+          {
+            nudgeDelay_ms = min(nudgeDelay_ms * 2, (uint32_t)WIFI_RECONNECT_NUDGE_MAX_MS);
+          }
         }
         blinkOneTime(1000, false);
         blinkOneTime(100, false);

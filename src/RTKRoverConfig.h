@@ -225,6 +225,27 @@ the post-connect grace window, reconnect backoff, and bounded mutex takes.
                                            // long without association (wedged-
                                            // driver escape hatch)
 
+// Association-attempt backoff. Every nudge is a full-power association burst,
+// and a unit powered on before its phone's hotspot used to repeat them at a
+// fixed 10 s forever. That cadence is worth paying while the hotspot is
+// probably coming back (a walk in a tunnel); it is pure current burned on a
+// sagging pack when the phone is simply switched off. Doubles per unanswered
+// nudge, resets when the outage ends or the driver is re-inited.
+#define WIFI_RECONNECT_NUDGE_MAX_MS 60000  // cap for the doubling nudge cadence
+
+// Grace before an outage becomes a `wifi_disconnected` event. Since the boot
+// no longer blocks on association (see setup()), the NTRIP task's outage loop
+// is now also the path a unit takes when it boots before its hotspot exists —
+// the normal case in the field. Reporting that instantly would turn a routine
+// power-on into a fleet-wide severity-1 rate spike and make the code useless
+// as an alert dimension. Real outages last longer than this.
+#define WIFI_LOSS_REPORT_AFTER_MS   30000
+
+// Gap between the BT controller's radio-on and WiFi's. Both PHY inits pull a
+// current step from the same 3V3 rail (AP2112K, shared with the ZED-F9P and
+// the BNO080); back-to-back they land on the same bulk capacitance.
+#define RADIO_START_STAGGER_MS        300
+
 // Hotspot path warmer (diagnosed 2026-08-28, rwa-hs-1): iOS Personal Hotspot
 // idles its upstream cellular data session when clients go quiet. During a
 // caster outage the reconnect backoff leaves 5-60 s quiet gaps, the hotspot

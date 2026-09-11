@@ -100,19 +100,26 @@ Update the serial-port paths in [`platformio.ini`](./platformio.ini) to the valu
 
 ![blink-codes](./assets/blink-codes.svg)
 
+> **Stale:** the diagram still shows the old startup order (`setupWiFi()`
+> → "wait for WiFi connection" → `setupBLE()`). The list below is current; the
+> diagram needs re-exporting from its draw.io source.
+
 #### Startup
 
 * 1.0s 2x: started setup (blocking)
 * 0.125s 2x 1.0s 1x (watch for this to spot reboots) (blocking)
+* `setupBLE` no blinking. unit is now discoverable
 * `setupWiFi`
-* 0.125s 4x (blocking, after first WiFi connection attempt)
-* while wait for WiFi Connection
-  * 1.0s, 0.1s (blocking)
-* `setupBLE` no blinking
+* 0.125s 4x (blocking, after the single WiFi connection attempt)
 * `setupGNSS`
   * while myGNSS.begin
     * 0.5s: setupGNSS() failed (I2C setup) (blocking)
 * FreeRTOS queues and tasks setup
+
+`setupWiFi()` makes one bounded attempt and setup continues regardless. A
+missing hotspot is handled at runtime by `task_rtk_get_corrrection_data` (its
+1.0s/0.1s pattern below), so that blink code now also means "booted before the
+hotspot was up", not only "lost it".
 
 #### Runtime
 

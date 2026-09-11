@@ -130,7 +130,8 @@ Hardware-in-the-loop iteration needs, once per machine/session:
   reported in every heartbeat event.
 - Partition table: two-OTA-slot scheme (ota_0/ota_1 + otadata) is the target for
   deployed builds, but the tree currently ships `no_ota.csv`. **Blocking conflict:**
-  the app is already ~1.63 MB (77.7 % of the 2 MB single slot), so the stock
+  the app is already ~1.65 MB (78.5 % of the 2 MB single slot, measured
+  2026-09-08), so the stock
   `default.csv` (1.25 MB per OTA slot) will not link. Moving to OTA needs
   `min_spiffs.csv` (~1.9 MB/slot) or a custom table — decide before item 5 in the
   work queue.

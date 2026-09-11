@@ -9,6 +9,47 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- **BLE no longer waits for WiFi** (`setup()` in `main.cpp`). `setupBLE()` used to
+  sit behind an unbounded `while (!WiFi.isConnected())`, so a unit powered on
+  before its phone's hotspot didn't call `BLEDevice::init()`: the app
+  had nothing to discover and the
+  wearer had to bring the hotspot up first, then open RWA Player. No more waiting:
+  BLE advertises within a second of boot and `setupWiFi()` makes one
+  bounded attempt (10 s) before setup continues regardless of the result. Any
+  power-on order now works.
+
+  The second reconnect loop this removes was redundant, not load-bearing. WiFi
+  has exactly one consumer, `task_rtk_get_corrrection_data`, and that task
+  already owned the identical nudge/re-init ladder for a hotspot that is missing
+  or lost.
+
+  This also un-hides the firmware's own diagnostics: `reset_brownout` and the
+  `i2c_*` events wait in the telemetry ring for a BLE central, so under the old
+  order exactly the boots that died before associating could never report why.
+  Field brownout counts before this change are a lower bound.
+
+  BLE and WiFi radio-on are separated by `RADIO_START_STAGGER_MS` (300 ms): both
+  PHY inits pull a current step from the same AP2112K 3V3 rail, shared with the
+  ZED-F9P and BNO080. `setupWiFi()` still runs ahead of the sensor tasks, so the
+  association burst keeps the relatively quiet radio it has always had.
+
+- **Association-attempt backoff** (`WIFI_RECONNECT_NUDGE_MAX_MS`, 60 s). The
+  NTRIP task's outage loop nudged `WiFi.reconnect()` at a fixed 10 s forever;
+  each nudge is a full-power association burst. Now the gap doubles per
+  unanswered nudge up to the cap, resetting when the outage ends or the driver
+  is re-inited. This matters more than it used to: the blocking boot loop was
+  incidentally acting as a power limiter for a unit with no hotspot, and
+  removing it hands that unit's idle time to this loop instead.
+
+- **`wifi_disconnected` now waits 30 s** (`WIFI_LOSS_REPORT_AFTER_MS`) before
+  emitting. With the boot no longer blocking, a power-on before the hotspot
+  exists reaches the same outage path, and reporting on entry would fire the
+  code on nearly every startup — useless as an alert dimension. Real outages
+  outlast the grace. Same code and severity, no schema change; PROJECT-PLAN.md
+  §4.3's description updated.
+
 [0.46.0] - 2026-08-28
 
 ### Changed
