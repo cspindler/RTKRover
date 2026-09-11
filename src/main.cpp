@@ -552,7 +552,6 @@ void updatePosition()
   // cached read. The whole mutex-held body is measured, not just checkUblox.
   uint32_t holdStart_ms = millis();
   bool llhFresh = myGNSS.getHPPOSLLH();       // pass 1 (drains pending I2C)
-  uint32_t llhMs = millis() - holdStart_ms;
   bool ecefFresh = myGNSS.getNAVHPPOSECEF();  // pass 2 (usually finds nothing new)
   bool pvtFresh = myGNSS.getPVT();            // pass 3
 
@@ -626,9 +625,8 @@ void updatePosition()
     if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
     {
       lastStallEmit_ms = millis();
-      char msg[80];
-      snprintf(msg, sizeof(msg), "updatePosition held mutex %u ms (llh pass %u ms)",
-               (unsigned)holdMs, (unsigned)llhMs);
+      char msg[48];
+      snprintf(msg, sizeof(msg), "updatePosition held mutex %u ms", (unsigned)holdMs);
       telemetryEmitError(1, "gnss_pipe_stall", msg);
     }
   }
@@ -799,11 +797,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
   {
     telemetryNoteNtripLoop();  // heartbeat liveness counter (key 18)
 
-    // gnss_pipe_stall instrumentation: phase timers for this iteration.
-    // Whatever exceeds GNSS_PIPE_STALL_MS in one pass is emitted as a sev-1
-    // error at the bottom of the loop (2026-08-21 slowdown diagnosis).
+    // gnss_pipe_stall: an iteration over GNSS_PIPE_STALL_MS is reported at
+    // the bottom of the loop. Deliberate waits (recovery, WiFi outage,
+    // backoff) restart the clock so they don't count as a stall.
     uint32_t iterStart_ms = millis();
-    uint32_t mutexWaitMs = 0, ubxMs = 0, pushMs = 0, ggaMs = 0;
 
     // Mirror the link state for the telemetry heartbeat
     bool nowConnected = ntripClient.connected();
@@ -836,18 +833,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       // but this pass is cheap while mute (no bytes) and guarantees the
       // revived stream gets parsed for lastGgaHeard_ms to recover even if
       // that task is wedged on a degraded bus.
-      uint32_t phase_ms = millis();
       if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
       {
-        mutexWaitMs += millis() - phase_ms;
-        phase_ms = millis();
         myGNSS.checkUblox();
-        ubxMs += millis() - phase_ms;
         xSemaphoreGive(mutexSem);
-      }
-      else
-      {
-        mutexWaitMs += millis() - phase_ms;
       }
       myGNSS.checkCallbacks();
 
@@ -859,10 +848,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         const char *action = "skipped (mutex busy)";
         bool attempted = false;
         const char *failedStep = NULL;  // configureGNSS() result, valid if attempted
-        phase_ms = millis();
         if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_RECOVERY_MUTEX_MS)))
         {
-          mutexWaitMs += millis() - phase_ms;
           attempted = true;
           switch (gnssRecoveryStage)
           {
@@ -885,10 +872,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           }
           xSemaphoreGive(mutexSem);
           if (gnssRecoveryStage < 2) gnssRecoveryStage++;
-        }
-        else
-        {
-          mutexWaitMs += millis() - phase_ms;
         }
         char msg[96];
         snprintf(msg, sizeof(msg), "receiver silent %u s, recovery #%u: %s%s%s",
@@ -1265,18 +1248,10 @@ void task_rtk_get_corrrection_data(void *pvParameters)
           // mutex: it touches no I2C, and it invokes callbackGPGGA, which
           // takes mutexSem itself (non-recursive - taking it here would
           // self-deadlock this task and starve positioning).
-          uint32_t phase_ms = millis();
           if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
           {
-            mutexWaitMs += millis() - phase_ms;
-            phase_ms = millis();
             myGNSS.checkUblox();
-            ubxMs += millis() - phase_ms;
             xSemaphoreGive(mutexSem);
-          }
-          else
-          {
-            mutexWaitMs += millis() - phase_ms;
           }
           myGNSS.checkCallbacks();
         }
@@ -1317,13 +1292,9 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         //task is in a slow-I2C stretch, dropping one redundant correction
         //slice beats stalling the link (the 12-26 s portMAX_DELAY waits here
         //are what killed every session on 2026-08-24).
-        uint32_t phase_ms = millis();
         if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GNSS_MUTEX_TIMEOUT_MS)))
         {
-          mutexWaitMs += millis() - phase_ms;
-          phase_ms = millis();
           myGNSS.pushRawData(rtcmData, rtcmCount, false);
-          pushMs += millis() - phase_ms;
           telemetryNoteRtcmPushed(rtcmCount);  // feeds corr_age_ms + bytes_rx
           xSemaphoreGive(mutexSem);
           DBG.print(F("RTCM pushed to ZED: "));
@@ -1331,7 +1302,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         }
         else
         {
-          mutexWaitMs += millis() - phase_ms;
           DBG.print(F("RTCM slice dropped (mutex busy): "));
           DBG.println(rtcmCount);
         }
@@ -1349,10 +1319,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
 
       // Bounded take; on timeout the gate is left expired, so the next
       // iteration (~1 s) retries instead of waiting the full 10 s period.
-      uint32_t phase_ms = millis();
       if (xSemaphoreTake(mutexSem, pdMS_TO_TICKS(GGA_MUTEX_TIMEOUT_MS)))
       {
-        mutexWaitMs += millis() - phase_ms;
         if (ggaSentenceComplete == true)
         {
           strncpy(localGgaSentence, ggaSentence, NMEA_GGA_MAX_LENGTH - 1);
@@ -1365,10 +1333,6 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         }
         xSemaphoreGive(mutexSem);
       }
-      else
-      {
-        mutexWaitMs += millis() - phase_ms;
-      }
 
       if (shouldSendGga)
       {
@@ -1376,10 +1340,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
         DBG.println(localGgaSentence);
 
         //Push our current GGA sentence to caster
-        phase_ms = millis();
         ntripClient.print(localGgaSentence);
         ntripClient.print("\r\n");
-        ggaMs += millis() - phase_ms;
       }
     }
 
@@ -1408,10 +1370,11 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       }
     }
 
-    // gnss_pipe_stall: a whole iteration over threshold gets reported with
-    // its phase breakdown (any remainder beyond the four phases is connect /
-    // response-wait time). Iterations that `continue` above skip this on
-    // purpose: their delays are deliberate retry pacing.
+    // gnss_pipe_stall: a whole iteration over threshold is reported. The
+    // 2026-08-21/24 causes (20 Hz nav rate, polled getters, unbounded mutex
+    // takes) are fixed; the event stays as a "something is slow" alarm, the
+    // per-phase breakdown it used to carry is gone. Iterations that
+    // `continue` above skip this on purpose: their delays are retry pacing.
     uint32_t iterMs = millis() - iterStart_ms;
     if (iterMs > GNSS_PIPE_STALL_MS)
     {
@@ -1419,11 +1382,8 @@ void task_rtk_get_corrrection_data(void *pvParameters)
       if (millis() - lastStallEmit_ms >= GNSS_PIPE_STALL_GAP_MS)
       {
         lastStallEmit_ms = millis();
-        char msg[96];
-        snprintf(msg, sizeof(msg),
-                 "ntrip iter %u ms (mutex %u, ubx %u, push %u, gga %u)",
-                 (unsigned)iterMs, (unsigned)mutexWaitMs, (unsigned)ubxMs,
-                 (unsigned)pushMs, (unsigned)ggaMs);
+        char msg[32];
+        snprintf(msg, sizeof(msg), "ntrip iter %u ms", (unsigned)iterMs);
         telemetryEmitError(1, "gnss_pipe_stall", msg);
       }
     }

@@ -40,6 +40,14 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
   from `ESP_GATTS_CONNECT_EVT`, MTU 517, heading notifies at the 20 ms pacing,
   position stream at 10 Hz. +140 B flash.
 
+- **`gnss_pipe_stall` reports the time, not a phase breakdown.** The event was
+  added 2026-08-21 to find a slowdown whose causes are fixed (20 Hz nav rate,
+  polled getters, unbounded mutex takes). The four phase accumulators in the
+  NTRIP task (ten `phase_ms` timing sites around every mutex take, push and GGA
+  write) and the `llh pass` split in `updatePosition()` are gone; the message is
+  now `ntrip iter N ms` / `updatePosition held mutex N ms`. Same `code` string,
+  same threshold and rate limit, so the Grafana dimension is unchanged. −300 B.
+
 ## [Unreleased - lean pass part 1]
 
 ### Changed
