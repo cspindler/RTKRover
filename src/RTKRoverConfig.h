@@ -111,6 +111,21 @@
 #define TELEMETRY_CTRL_CHARACTERISTIC_UUID      "713D0102-503E-4C75-BA94-3148F18D941E"
 #define DATA_STR_DELIMITER           " "
 
+// Heading notify pacing (see the block comment above bleGapHandler in main.cpp).
+// The IMU is still drained every TASK_BNO_ORIENTATION_VIA_BLE_INTERVAL_MS; these
+// bound only how often a frame is put on the wire. The working value is derived
+// from the connection interval the central granted, one sensor tick short of it.
+#define HEADING_NOTIFY_FALLBACK_MS    15   // until GAP reports the interval: fast
+                                            // enough that a central which never
+                                            // triggers the event costs no latency
+#define HEADING_NOTIFY_MIN_MS         10   // never faster than the sensor tick
+#define HEADING_NOTIFY_MAX_MS        120   // sanity bound only; a central asking
+                                            // for a very long interval should get
+                                            // one frame per event, not a stall
+#define BLE_TX_CONGESTION_MAX_MS     500   // ignore a stuck "congested" flag after
+                                            // this long: a missed CONGEST-cleared
+                                            // event must not freeze head tracking
+
 /*
 =================================================================================
                                 BNO080 settings

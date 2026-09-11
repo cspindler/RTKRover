@@ -419,15 +419,27 @@ not an app one. (The app does not write CTRL today.)
 ### 5.5 Binary heading frame (`713D0005`, rtk-rover ≥ 0.46.0, RWAHT >= 0.3.0)
 
 One notification = one frame = **16 bytes, little-endian, packed** (fits the 20 B
-default-MTU notify payload; no reassembly, no length prefix). ~100 Hz while a
-central is connected (RWAHT: while subscribed, §5.1). This is a cross-repo contract:
-encoders in `rtk-rover` `src/main.cpp` and `rwa-headtracker` `rwaht/rwaht.ino`
-(`heading_frame_t` in both), decoders in `rwa-player`
-(`HeadtrackerManager.swift`) and `rwa-creator` (`bluetooth/devicehandler.cpp`).
-Consumers that need rotation speed derive it as delta angle / delta `t_dev_ms` from
-consecutive frames, not from an assumed sample interval, which differs
-between the binary path (100 Hz) and the legacy ASCII path (connection-interval
-dependent, ~50–66 Hz).
+default-MTU notify payload; no reassembly, no length prefix). One frame per BLE
+connection event while a central is connected (RWAHT: while subscribed, §5.1),
+so the rate is the connection interval the central grants: roughly 22–45 Hz on
+iOS. This is a cross-repo contract: encoders in `rtk-rover` `src/main.cpp` and
+`rwa-headtracker` `rwaht/rwaht.ino` (`heading_frame_t` in both), decoders in
+`rwa-player` (`HeadtrackerManager.swift`) and `rwa-creator`
+(`bluetooth/devicehandler.cpp`).
+
+Consumers **must not assume a sample interval**: derive rotation speed as delta
+angle / delta `t_dev_ms` from consecutive frames. The rate is set by the central
+and can change mid-session.
+
+Sampling and transmission are separate in rtk-rover (>= 0.46.2): the IMU is
+drained every 10 ms and the cached frame always holds the newest sample, but
+only one frame is put on the wire per connection event. Nothing can leave the
+device between connection events anyway, so a faster notify rate only queued
+frames that arrived in the same burst and were discarded by the app, at the cost
+of radio airtime (WiFi blackout through coex) and Bluedroid TX buffers.
+`t_dev_ms` is stamped at sample time, so the gap between it and arrival is the
+real sample age; `seq` counts frames put on the wire, so a gap in it still means
+lost notifications, not coalesced samples.
 
 | offset | field | type | meaning |
 | --- | --- | --- | --- |

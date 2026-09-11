@@ -9,6 +9,54 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- One heading frame per BLE connection event (`task_bno_orientation_via_ble`):
+  Sampling and transmission are now separate: the IMU is still drained every
+  10 ms and the cached frame always holds the newest sample, but a frame goes on
+  the wire only once per connection event.
+
+  Nothing can leave the device between connection events: the central anchors
+  the link at the negotiated interval and `notify()` only enqueues for the next
+  one. Notifying faster therefore never made data arrive sooner; it queued 2–3
+  frames that rode out in the same burst, where the app renders the newest and
+  discards the rest. Each discarded frame still cost airtime (a longer
+  connection event is a longer WiFi blackout through radio coex) and still held
+  a Bluedroid TX buffer, which is heap: 0.46.0 roughly doubled the notify rate
+  and cost every unit in the fleet 2–6 kB of p10 free heap (backend query
+  2026-09-11, five units, same direction on all of them).
+
+  The pacing adapts rather than guessing: the interval the central granted is
+  read from `ESP_GATTS_CONNECT_EVT` (`conn_params.interval`), and the notify
+  period is set one sensor tick short of it. `ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT`
+  is also watched, for a later renegotiation — but it is *not* the primary
+  source, because with iOS it never fires: the phone accepts the advertised
+  preference at connect and runs no update procedure, which left the first
+  bench build stuck on its fallback. No connection-interval *request* is made,
+  and none may be added — a 15–30 ms request killed the NTRIP stream outright.
+  Until an interval is known the period falls back to 15 ms, so a central that
+  reports nothing costs no latency.
+
+  Measured on rwa-hs-1 with RWA Player attached: iOS granted 24 units (30.00 ms),
+  sampling held at 75 ticks/s, transmission fell from ~73.5 to ~37.6 frames/s.
+  Against 33.3 connection events/s that is ~1.1 frames per event, down from ~2.2
+  — close to the one-per-event target, with the residual coming from phase drift
+  between the notify clock and the link's anchor points.
+
+  `ESP_GATTS_CONGEST_EVT` now feeds back as well: a congested TX queue means
+  earlier frames have not gone out, so the tick skips rather than deepening a
+  backlog the app would discard. That replaces the silent frame loss behind the
+  `esp_ble_gatts_send_notify: rc=-1` storms seen on bench-1. A stuck congestion
+  flag is ignored after 500 ms so a missed "cleared" event cannot freeze head
+  tracking.
+
+  Contract effects, PROJECT-PLAN.md §5.5 updated: the frame rate is now the
+  connection interval (~22–45 Hz on iOS) rather than ~100 Hz, `t_dev_ms` is
+  stamped at sample time so the app can see real sample age, and `seq` counts
+  frames put on the wire so drop detection keeps its meaning. Consumers were
+  already told to derive rotation speed from `t_dev_ms` deltas rather than an
+  assumed rate.
+
 ### Fixed
 
 - The association backoff no longer outlasts the hotspot coming back. The ladder
