@@ -9,7 +9,7 @@ in every telemetry heartbeat). History before 0.44.0 predates this changelog.
 
 ## [Unreleased]
 
-## [0.48.0] - 2026-09-11
+## [0.48.0] - 2026-09-12
 
 ADR-001: BLE-only transport, NTRIP proxied through the phone
 (`ADR-001-ble-only-transport.md`). Breaking for rwa-player and rwa-creator: the app becomes

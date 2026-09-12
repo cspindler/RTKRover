@@ -9,7 +9,7 @@
  * @todo  - Upgrade to Sparkfun RTK Library v3
  *
  * @version 0.48.0
- * @date 2026-09-11
+ * @date 2026-09-12
  ******************************************************************************/
 
 #include <Arduino.h>
