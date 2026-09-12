@@ -1,8 +1,9 @@
 # ADR-001: BLE-only transport, NTRIP proxied through the phone
 
-- **Status:** Proposed (2026-09-11). Firmware side implemented the same day on branch
-  `ble-only-transport` (rtk-rover 0.48.0, §9). Needs the bench A/B in §7 with the app
-  side before acceptance.
+- **Status:** Implemented (2026-09-12). Firmware side implemented on branch
+  `ble-only-transport` (rtk-rover 0.48.0). Acceptance tests (§7) produced good
+  results. RWA Player (>= v1.4.0) and RWA Creator (>= v1.6.1) are updated with
+  NTRIP clients and RTCM writer, including settings and stats output.
 - **Scope:** rtk-rover firmware, rwa-player (NTRIP client, RTCM writer), rwa-creator
   (heading consumer), PROJECT-PLAN.md (§4–5 contract). RWAHT is unaffected.
 - **Supersedes on acceptance:** the NimBLE port (memory ladder step 1), the hotspot
@@ -182,8 +183,21 @@ buffer and crossfade), but that work only pays off once the link stops dominatin
 
 ## 9. Implementation notes (2026-09-11, branch `ble-only-transport`, rtk-rover 0.48.0)
 
-Firmware side implemented; the status stays Proposed until §7 is run with the app
-side. Deviations from the text above, and what the bench showed:
+### Bench for ADR-001 7.2
+
+rwa-hs-1, debug build, the current RWA Player build as the central, 2026-09-11
+
+| criterion | result |
+|---|---|
+| heap minimum ≥ 40 KB | 87.3 KB free steady, 85.1 KB min-ever (was ~11.6 / 6.5 KB with WiFi + NTRIP); 106 KB free at BLE connect |
+| granted interval logged at connect | `BLE conn params granted: interval 12 units (15.00 ms)` 0.4 s after connect; a 15–30 ms request came back at 30 ms |
+| heading delivery | 74 frames/s on the wire, one per ~13.5 ms sensor tick, `misses 0`, no TX congestion (38/s at 30 ms); the app-side jitter measurement is open |
+| RTCM pushes ≥ 250 / 300 s, fix ≤ 200 mm | not testable without the app side; the receiver ran fixless (h_acc 3.2–3.9 m), `rtcm_bytes` 0 |
+| GGA uplink | 49 fix-quality sentences notified in 60 s (1 Hz), none skipped after the MTU exchange |
+| tasks | stack min free: corrections 2536 of 8 KB, position 1952, heading 2088, telemetry 2168 (of 4 KB each); position lines ~8/s; 19/19 AUnit tests |
+| crashes | none in three captures (120 + 45 + 60 s); one `i2cRead returned Error 263` at IMU init in the first capture, not reproduced |
+
+Firmware side implemented; Deviations from the text above, and what the bench showed:
 
 - **Branched from `main` (0.47.0), not from `test-ntrip-off`.** That branch predates
   the lean pass (the `ble_link` module, the task split); its WiFi-off patch is three
@@ -215,3 +229,17 @@ side. Deviations from the text above, and what the bench showed:
   interval logged and granted, 74 frames/s, GGA at 1 Hz; details in CHANGELOG 0.48.0).
   RTCM ≥ 250 / 300 s, the fix, the app-side jitter (step 2), step 1 (the app's NTRIP
   client), step 3 (brownouts) and the Grafana dimension change are open.
+
+### Acceptance run
+
+Pulled from rwa-backend, after RWA Player was implemented, 2026-09-12.
+Ran 3 sessions, some with planned BLE disconnects.
+
+- NTRIP was up 100%
+- RTCM stream showed constant byte rate
+- Convergence to RTK float: ~8s, to 200mm ~19s
+- Zero errors on assembly and phone
+- no brownout over 2.5h
+- excellent heap stats on assembly (~80 KB free)
+
+Ran further tests connected to RWA Creator insead of RWA Player, no problems to report.
