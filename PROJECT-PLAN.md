@@ -245,10 +245,20 @@ the app heartbeat and in `ntrip_status`.
 driving the hero, or `none`), `batt_pct` (phone battery), `ntrip_connected` (bool, the app's
 caster session; since ADR-001).
 
-**`ntrip_status`** (app, `source` = `phone`; rwa-player is the NTRIP client since ADR-001):
-on state change: `state` ("connected" / "disconnected" / "reconnecting"), `reconnects`
-(counter), `bytes_rx` (cumulative, RTCM bytes received from the caster this session).
-Firmware ≤ 0.47 emitted the same event as `rtk_headtracker`.
+**`ntrip_status`** (app, `source` = `phone`; rwa-player is the NTRIP client
+since ADR-001): on state change: `state` ("connected" / "disconnected" /
+"reconnecting"), `reconnects` (successful connects − 1), `bytes_rx` (cumulative
+./update_version.sh 1.3.20 bytes received from the caster). Both counters belong
+to one caster client, which lives as long as the BLE connection to the assembly:
+they restart at 0 after a BLE reconnect, a caster-settings change or an app
+relaunch. `reconnecting` is reported once per outage and only for caster-side
+drops; a BLE drop appears as `disconnected` followed by `connected` with fresh
+counters. `reconnects` in the last event of a client is therefore the
+caster-side reconnect count for that BLE connection, not for the app session.
+The app also records `app_event`s `ntrip_started` (`data.caster`) and
+`ntrip_failed` (`data.reason`, `data.caster`; once per outage), so a session
+that never opens is visible too. Firmware ≤ 0.47 emitted the same event as
+`rtk_headtracker` with counters per boot.
 
 **`imu_status`**: every 60 s, and only while a phone is connected over BLE:
 `calib_status`, `report_rate_hz`, `resets`. Unlike `heartbeat`, nothing is recorded while the
